@@ -1,0 +1,42 @@
+{
+  "name": "pyrosense-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "PYROSENSE backend — data ingestion, scoring, and AI summary service",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "ingest:firms": "tsx src/jobs/ingestFirmsArchive.ts",
+    "ingest:facilities": "tsx src/jobs/ingestFacilities.ts",
+    "ingest:dataset": "tsx src/jobs/ingestUserDataset.ts",
+    "refresh:firms": "tsx src/jobs/refreshLiveFirms.ts",
+    "match:detections": "tsx src/jobs/runMatching.ts"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "compression": "^1.7.5",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.0",
+    "express-rate-limit": "^7.4.0",
+    "lru-cache": "^11.0.1",
+    "node-cron": "^3.0.3",
+    "p-limit": "^6.1.0",
+    "pino": "^9.4.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/compression": "^1.7.5",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.0",
+    "@types/node-cron": "^3.0.11",
+    "pino-pretty": "^11.2.2",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.2"
+  }
+}

@@ -1,0 +1,185 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------------- base ---------------- */
+html,
+body {
+  height: 100%;
+}
+
+body {
+  @apply bg-bg-void text-text-primary font-body antialiased;
+  overscroll-behavior: none;
+}
+
+/* ---------------- leaflet: dark, edge-to-edge sensor feed ---------------- */
+.leaflet-container {
+  background: #0b0e11;
+  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  outline: none;
+}
+
+/* OSM tiles inverted into dark sensor-feed style — calmer desaturation */
+.map-tiles-dark {
+  filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.85) grayscale(0.6);
+}
+
+/* Wikimedia place-name overlay — English labels, blended over satellite
+   imagery: desaturated + screen-blended so only text/boundaries show
+   through and the photography stays untouched underneath. */
+.pyro-tile-labels {
+  opacity: 0.9;
+  mix-blend-mode: screen;
+}
+
+.pyro-tile-labels img {
+  filter: grayscale(1) invert(1) contrast(0.85) brightness(1.05)
+    drop-shadow(0 0 2px rgba(0, 0, 0, 0.9));
+}
+
+.leaflet-control-attribution {
+  background: rgba(7, 9, 11, 0.75) !important;
+  color: #525a66 !important;
+  font: 400 10px/1.6 var(--font-jetbrains-mono), monospace !important;
+  padding: 0 6px;
+}
+
+.leaflet-control-attribution a {
+  color: #78808c !important;
+}
+
+/* default zoom control replaced by custom */
+.leaflet-bar {
+  display: none;
+}
+
+/* Map hover cards — opaque dark surface, calm shadow */
+.leaflet-tooltip {
+  background: #101418 !important;
+  border: 1px solid #1a2028;
+  border-radius: 10px;
+  color: #c6cdd6;
+  box-shadow:
+    0 8px 24px rgba(7, 9, 11, 0.7),
+    0 2px 6px rgba(7, 9, 11, 0.4);
+  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 10px 12px;
+}
+
+.leaflet-tooltip.pyro-tooltip-clickable {
+  cursor: pointer;
+  transition:
+    border-color 200ms ease,
+    box-shadow 200ms ease;
+}
+.leaflet-tooltip.pyro-tooltip-clickable:hover {
+  border-color: #6e93be;
+  box-shadow:
+    0 8px 24px rgba(7, 9, 11, 0.7),
+    0 0 0 1px rgba(110, 147, 190, 0.2);
+}
+
+.leaflet-tooltip-top::before {
+  border-top-color: #1a2028;
+}
+.leaflet-tooltip-bottom::before {
+  border-bottom-color: #1a2028;
+}
+.leaflet-tooltip-left::before {
+  border-left-color: #1a2028;
+}
+.leaflet-tooltip-right::before {
+  border-right-color: #1a2028;
+}
+
+/* ---------------- critical marker glow — subtle breathing halo ---------------- */
+.pyro-halo {
+  animation: pyro-halo 2.5s ease-in-out infinite;
+}
+
+@keyframes pyro-halo {
+  0%,
+  100% {
+    opacity: 0.1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.pyro-marker-critical {
+  filter: drop-shadow(0 0 5px rgba(194, 106, 106, 0.5));
+}
+
+/* color interpolation while JS tween runs */
+.pyro-marker {
+  transition: fill 400ms ease;
+}
+
+/* FIRMS live-corroborated facilities: subtle teal halo */
+.pyro-halo-cyan {
+  filter: drop-shadow(0 0 5px rgba(79, 179, 179, 0.5));
+}
+
+/* ---------------- timeline range slider — muted tones ---------------- */
+.pyro-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 3px;
+  border-radius: 9999px;
+  outline: none;
+  cursor: pointer;
+}
+
+.pyro-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background: #c6cdd6;
+  border: 2px solid #6e93be;
+  box-shadow: 0 0 0 3px rgba(110, 147, 190, 0.15);
+  cursor: pointer;
+}
+
+.pyro-range::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background: #c6cdd6;
+  border: 2px solid #6e93be;
+  box-shadow: 0 0 0 3px rgba(110, 147, 190, 0.15);
+  cursor: pointer;
+}
+
+.pyro-range::-moz-range-track {
+  background: transparent;
+}
+
+/* ---------------- scrollbars — near-invisible, calm ---------------- */
+.pyro-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #151a20 transparent;
+}
+
+.pyro-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.pyro-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.pyro-scroll::-webkit-scrollbar-thumb {
+  background: #1a2028;
+  border-radius: 9999px;
+}
+
+.pyro-scroll::-webkit-scrollbar-thumb:hover {
+  background: #262e38;
+}

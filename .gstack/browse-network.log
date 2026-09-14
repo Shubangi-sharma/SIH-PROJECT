@@ -1,0 +1,2 @@
+[2026-09-12T18:41:05.710Z] GET http://localhost:3000/map → pending (?ms, ?B)
+[2026-09-12T18:41:13.324Z] GET http://localhost:3000/ → pending (?ms, ?B)
