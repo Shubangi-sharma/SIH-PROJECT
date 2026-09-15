@@ -37,7 +37,15 @@ const schema = z.object({
    */
   OPENROUTER_API_KEY: z.string().trim().optional().default(""),
   OPENROUTER_API_URL: z.string().trim().optional().default("https://openrouter.ai/api/v1"),
-  OPENROUTER_MODEL: z.string().trim().optional().default("nvidia/nemotron-3-ultra-550b-a55b:free"),
+  /** Primary model — must respond reliably on the free tier. */
+  OPENROUTER_MODEL: z.string().trim().optional().default("nvidia/nemotron-3-super-120b-a12b:free"),
+  /**
+   * Comma-separated fallback models tried in order when the primary model
+   * errors, stalls, or returns no usable content. Nemotron models are
+   * reasoning models: reasoning must be disabled explicitly and any
+   * leaked <think> block stripped (see genaiService/chatService).
+   */
+  OPENROUTER_FALLBACK_MODELS: z.string().trim().optional().default("nvidia/nemotron-3.5-lightning:free"),
 
   /** SQLite file path, relative to backend/ or absolute. */
   DATABASE_URL: z.string().trim().min(1).default("./data/pyrosense.db"),

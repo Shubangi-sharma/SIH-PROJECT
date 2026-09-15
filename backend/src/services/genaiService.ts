@@ -26,7 +26,7 @@ const SYSTEM_PROMPT = `You are a thermal-monitoring analyst writing an incident 
 const USER_INSTRUCTION =
   "Using ONLY the facts listed above, write a 3–4 sentence summary of this facility's current thermal behavior. Do not invent any number, date, or detail not present above. If information needed to explain a pattern isn't in the facts given, say the data is insufficient rather than guessing.";
 
-interface ProviderCall {
+export interface ProviderCall {
   provider: "openrouter";
   url: string;
   apiKey: string;
@@ -36,20 +36,51 @@ interface ProviderCall {
 function providerChain(): ProviderCall[] {
   const chain: ProviderCall[] = [];
   if (env.OPENROUTER_API_KEY) {
-    chain.push({
-      provider: "openrouter",
-      url: `${env.OPENROUTER_API_URL.replace(/\/+$/, "")}/chat/completions`,
-      apiKey: env.OPENROUTER_API_KEY,
-      model: env.OPENROUTER_MODEL,
-    });
+    const url = `${env.OPENROUTER_API_URL.replace(/\/+$/, "")}/chat/completions`;
+    for (const model of modelChain()) {
+      chain.push({ provider: "openrouter", url, apiKey: env.OPENROUTER_API_KEY, model });
+    }
   }
   return chain;
 }
 
-/** OpenAI-compatible chat completion via plain fetch — no SDK, trivially swappable. */
-async function callProvider(p: ProviderCall, messages: { role: string; content: string }[]): Promise<string> {
+/** Primary model first, then configured fallback models — deduped, in order. */
+export function modelChain(): string[] {
+  const models = [env.OPENROUTER_MODEL, ...env.OPENROUTER_FALLBACK_MODELS.split(",")]
+    .map((m) => m.trim())
+    .filter(Boolean);
+  return [...new Set(models)];
+}
+
+/**
+ * Nemotron-family models are reasoning models: they emit their
+ * chain-of-thought in a <think>…</think> block inside `content` unless
+ * reasoning is explicitly disabled. Strip it so hidden reasoning never leaks
+ * into user-facing text (or trips the ungrounded-number validator on the
+ * model's own scratch arithmetic). An unterminated block means the token
+ * budget ran out mid-think — everything from <think> on is dropped.
+ */
+function stripThinkBlocks(text: string | undefined): string | undefined {
+  if (!text) return text;
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<think>[\s\S]*$/i, "")
+    .trim();
+}
+
+/**
+ * OpenAI-compatible chat completion via plain fetch — no SDK, trivially
+ * swappable. Shared by summary generation and the chat assistant so provider
+ * semantics (reasoning off, think-block stripping, error handling) live in
+ * exactly one place.
+ */
+export async function callProvider(
+  p: ProviderCall,
+  messages: { role: string; content: string }[],
+  opts: { timeoutMs?: number; temperature?: number; maxTokens?: number } = {},
+): Promise<string> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), PROMPT_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? PROMPT_TIMEOUT_MS);
   try {
     const res = await fetch(p.url, {
       method: "POST",
@@ -62,8 +93,12 @@ async function callProvider(p: ProviderCall, messages: { role: string; content: 
       },
       body: JSON.stringify({
         model: p.model,
-        temperature: 0,
-        max_tokens: 300,
+        temperature: opts.temperature ?? 0,
+        max_tokens: opts.maxTokens ?? 300,
+        // Reasoning models burn max_tokens on hidden chain-of-thought before
+        // producing any visible answer — and some free variants stall outright.
+        // Ask for plain completions; stripThinkBlocks catches any leak.
+        reasoning: { enabled: false },
         messages,
       }),
       signal: controller.signal,
@@ -75,9 +110,9 @@ async function callProvider(p: ProviderCall, messages: { role: string; content: 
     const json = (await res.json()) as {
       choices?: { message?: { content?: string } }[];
     };
-    const content = json.choices?.[0]?.message?.content;
+    const content = stripThinkBlocks(json.choices?.[0]?.message?.content);
     if (!content) throw new Error(`provider ${p.provider} returned no content`);
-    return content.trim();
+    return content;
   } finally {
     clearTimeout(timer);
   }

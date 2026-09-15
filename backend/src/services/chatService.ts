@@ -17,6 +17,7 @@ import { analyzeFacility, analyzeAllFacilities, type FacilityAnalysis } from "./
 import { buildFactsText } from "./facts.js";
 import { getAllFacilitiesMerged } from "../db/client.js";
 import { cacheKeys, getAnalysesCached } from "./cacheService.js";
+import { callProvider, modelChain, type ProviderCall } from "./genaiService.js";
 import { LIVE_WINDOW_DAYS } from "../config/regions.js";
 
 const CHAT_TIMEOUT_MS = 25_000;
@@ -159,59 +160,32 @@ export async function chat(
   const context = buildContext(facilityId);
   const priorTurns = sanitizeHistory(history);
 
-  try {
-    const reply = await GENAI_QUEUE(async () => {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), CHAT_TIMEOUT_MS);
-      try {
-        const res = await fetch(
-          `${env.OPENROUTER_API_URL.replace(/\/+$/, "")}/chat/completions`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
-              "HTTP-Referer": "http://localhost:3000",
-              "X-Title": "PYROSENSE",
-            },
-            body: JSON.stringify({
-              model: env.OPENROUTER_MODEL,
-              temperature: 0.3,
-              max_tokens: 500,
-              messages: [
-                { role: "system", content: `${SYSTEM_PROMPT}\n\n${context}` },
-                ...priorTurns.map((t) => ({ role: t.role, content: t.content })),
-                { role: "user", content: message },
-              ],
-            }),
-            signal: controller.signal,
-          },
-        );
+  const url = `${env.OPENROUTER_API_URL.replace(/\/+$/, "")}/chat/completions`;
+  const messages = [
+    { role: "system", content: `${SYSTEM_PROMPT}\n\n${context}` },
+    ...priorTurns.map((t) => ({ role: t.role, content: t.content })),
+    { role: "user", content: message },
+  ];
 
-        if (!res.ok) {
-          const body = await res.text();
-          throw new Error(`OpenRouter HTTP ${res.status}: ${body.slice(0, 160)}`);
-        }
-
-        const json = (await res.json()) as {
-          choices?: { message?: { content?: string } }[];
-        };
-        const content = json.choices?.[0]?.message?.content;
-        if (!content) throw new Error("OpenRouter returned no content");
-        return content.trim();
-      } finally {
-        clearTimeout(timer);
-      }
-    });
-
-    genaiLog.info({ facilityId: facilityId ?? "overview", turns: priorTurns.length }, "chat response served");
-    return { reply, provider: "openrouter", grounded: true };
-  } catch (err) {
-    genaiLog.warn({ err: String(err) }, "chat provider call failed");
-    return {
-      reply: "I'm sorry, I couldn't process your question right now. The AI provider is temporarily unavailable. Please check the dashboard directly for facility status, scores, and anomaly reports.",
-      provider: "fallback",
-      grounded: true,
-    };
+  // Same chain semantics as summaries: primary model → fallback models.
+  // callProvider disables reasoning and strips <think> blocks, so a
+  // reasoning-tuned free model can no longer eat the whole token budget.
+  for (const model of modelChain()) {
+    const p: ProviderCall = { provider: "openrouter", url, apiKey: env.OPENROUTER_API_KEY!, model };
+    try {
+      const reply = await GENAI_QUEUE(() =>
+        callProvider(p, messages, { timeoutMs: CHAT_TIMEOUT_MS, temperature: 0.3, maxTokens: 500 }),
+      );
+      genaiLog.info({ facilityId: facilityId ?? "overview", model, turns: priorTurns.length }, "chat response served");
+      return { reply, provider: "openrouter", grounded: true };
+    } catch (err) {
+      genaiLog.warn({ err: String(err), model }, "chat provider call failed, trying next model");
+    }
   }
+
+  return {
+    reply: "I'm sorry, I couldn't process your question right now. The AI provider is temporarily unavailable. Please check the dashboard directly for facility status, scores, and anomaly reports.",
+    provider: "fallback",
+    grounded: true,
+  };
 }

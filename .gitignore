@@ -67,3 +67,6 @@ Thumbs.db
 .vercel/
 *.tsbuildinfo
 next-env.d.ts
+.uv-bin/
+.uv-pythons/
+.venv-model/
