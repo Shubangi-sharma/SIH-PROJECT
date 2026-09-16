@@ -51,6 +51,16 @@ const schema = z.object({
   DATABASE_URL: z.string().trim().min(1).default("./data/pyrosense.db"),
 
   /**
+   * Base URL of the pyrosense_ml (Python FastAPI) service. The Node backend
+   * proxies /api/predict and /api/ml/* to it so the frontend talks to ONE
+   * origin — consistent with how FIRMS/Overpass are kept server-side.
+   */
+  ML_API_BASE_URL: z
+    .string()
+    .url()
+    .default("http://localhost:5000"),
+
+  /**
    * Browser origins allowed by CORS. Special value "*" (or a "*" anywhere in
    * the list) reflects any origin — fine for local dev, do NOT ship to prod.
    *

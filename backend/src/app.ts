@@ -21,6 +21,7 @@ import { summaryRouter } from "./routes/summary.route.js";
 import { healthRouter } from "./routes/health.route.js";
 import { chatRouter } from "./routes/chat.route.js";
 import { commandRouter } from "./routes/command.route.js";
+import { predictRouter } from "./routes/predict.route.js";
 
 export function createApp(): Express {
   const app = express();
@@ -49,6 +50,10 @@ export function createApp(): Express {
   app.use("/api/chat", chatRouter);
   app.use("/api/command", commandRouter);
   app.use("/health", healthRouter);
+  // Pass-through proxy to the pyrosense_ml service (predict + ml read APIs).
+  // Mounted with full paths so the shared /api rate limiter does NOT apply
+  // twice; the predict route carries its own tighter bucket.
+  app.use(predictRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

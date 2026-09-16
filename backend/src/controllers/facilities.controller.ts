@@ -76,7 +76,10 @@ export function getFacilityAnalysis(req: Request, res: Response): void {
     json(res, 404, { error: `Facility not found: ${id}` });
     return;
   }
-  const { classification, narrative } = analyzeFacility(facility, new Date());
+  const { classification, narrative, persistence, fireCharacteristics } = analyzeFacility(
+    facility,
+    new Date(),
+  );
   json(res, 200, {
     facility,
     classification,
@@ -87,6 +90,9 @@ export function getFacilityAnalysis(req: Request, res: Response): void {
       classification: narrative.classification,
       classificationLabel: narrative.classificationLabel,
     },
+    // PDF §4 field groups computed from the stored FIRMS archive.
+    persistence,
+    fireCharacteristics,
   });
 }
 

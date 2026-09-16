@@ -7,7 +7,7 @@ import dynamic from "next/dynamic";
 import { ArrowUpRight, ShieldAlert, TrendingUp } from "lucide-react";
 import { FacilityAnalysis, RiskStatus, statusColorHex } from "@/lib/types";
 import { useAnalyses, useFirms, useCommand } from "@/lib/hooks";
-import { REGION_BBOXES } from "@/lib/regions";
+import { REGION_BBOXES, northOrWestRegion } from "@/lib/regions";
 import { StatusBadge, StatusGlyph } from "@/lib/status";
 import StatTile from "@/components/StatTile";
 import type { MapView } from "@/components/MapInner";
@@ -88,6 +88,24 @@ export default function DashboardPage() {
     [command],
   );
 
+  /** North / West region counts among hotspot-active facilities (PDF §2). */
+  const regionCounts = useMemo(() => {
+    const counts = { north: 0, west: 0, other: 0 };
+    for (const a of analyses) {
+      if (a.detectionCount > 0) counts[northOrWestRegion(a.facility.lat, a.facility.lng)] += 1;
+    }
+    return counts;
+  }, [analyses]);
+
+  /** Rule-based behavioural categories across monitored facilities. */
+  const categoryCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const f of command?.priorityList ?? []) {
+      counts.set(f.classificationLabel, (counts.get(f.classificationLabel) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [command]);
+
   return (
     <div className="pyro-scroll h-full overflow-y-auto">
       <div className="mx-auto flex max-w-[1200px] flex-col gap-6 p-6 pb-20">
@@ -111,28 +129,36 @@ export default function DashboardPage() {
           {loading ? (
             <StatSkeleton />
           ) : (
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
-              <StatTile label="Facilities Monitored" value={summary.facilitiesMonitored} />
-              <StatTile label="Thermal Hotspots" value={summary.thermalHotspots} />
-              <StatTile label="New Anomalies" value={summary.newAnomalies} toneStatus="watch" />
-              <StatTile
-                label="High-Risk Incidents"
-                value={summary.highRiskIncidents}
-                tone="suspicious"
-                toneStatus="suspicious"
-              />
-              <StatTile
-                label="Critical Incidents"
-                value={summary.criticalIncidents}
-                tone="critical"
-                toneStatus="critical"
-              />
-              <StatTile
-                label="Detections (10d)"
-                value={hotspots.length}
-                toneStatus={hotspots.length > 0 ? "watch" : "normal"}
-              />
-            </div>
+            <>
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
+                <StatTile label="Facilities Monitored" value={summary.facilitiesMonitored} />
+                <StatTile label="Thermal Hotspots" value={summary.thermalHotspots} />
+                <StatTile label="New Anomalies" value={summary.newAnomalies} toneStatus="watch" />
+                <StatTile
+                  label="High-Risk Incidents"
+                  value={summary.highRiskIncidents}
+                  tone="suspicious"
+                  toneStatus="suspicious"
+                />
+                <StatTile
+                  label="Critical Incidents"
+                  value={summary.criticalIncidents}
+                  tone="critical"
+                  toneStatus="critical"
+                />
+                <StatTile
+                  label="Detections (10d)"
+                  value={hotspots.length}
+                  toneStatus={hotspots.length > 0 ? "watch" : "normal"}
+                />
+              </div>
+              {/* PDF §2 regional split — real counts from the analysed bbox */}
+              <div className="mt-4 grid grid-cols-3 gap-4">
+                <StatTile label="North Region Active" value={regionCounts.north} />
+                <StatTile label="West Region Active" value={regionCounts.west} />
+                <StatTile label="Other Regions Active" value={regionCounts.other} />
+              </div>
+            </>
           )}
         </section>
 
@@ -236,6 +262,33 @@ export default function DashboardPage() {
             </div>
           )}
         </section>
+
+        {/* behavioural category mix — rule-based vocabulary, NOT ML classes */}
+        {!loading && categoryCounts.length > 0 && (
+          <section aria-label="Category mix" className="flex flex-col gap-3">
+            <div className="flex items-baseline justify-between px-1">
+              <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-text-secondary">
+                Behavioural Category Mix
+              </h2>
+              <span className="font-mono text-[10px] text-text-tertiary">
+                rule-based monitoring classification
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {categoryCounts.map(([label, n]) => (
+                <div
+                  key={label}
+                  className="rounded-xl border border-border-hairline bg-bg-surface px-4 py-3"
+                >
+                  <div className="font-display text-xl font-semibold text-text-primary">{n}</div>
+                  <div className="mt-0.5 text-[11px] uppercase tracking-wide text-text-secondary">
+                    {label}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* priority list — risk-ranked with classification */}
         {priorityList.length > 0 && (

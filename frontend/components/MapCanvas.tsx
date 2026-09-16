@@ -8,6 +8,7 @@ import {
   BookOpen,
   Flame,
   Satellite,
+  SlidersHorizontal,
 } from "lucide-react";
 import {
   FacilityAnalysis,
@@ -17,6 +18,7 @@ import {
 } from "@/lib/types";
 import { FirmsHotspot, FRP_BANDS } from "@/lib/firms";
 import type { Basemap, MapView } from "./MapInner";
+import { INDIA_STATE_BBOXES } from "@/lib/regions";
 import { StatusLegendRow } from "@/lib/status";
 import clsx from "clsx";
 
@@ -31,6 +33,22 @@ export type MapMode = "india" | "global";
  * the old landcover/FRP-heatmap stubs, which had no data behind them.
  */
 export type LayerId = "firms" | "boundaries";
+
+/** PDF §3 filter state — every control maps to a real field on the data. */
+export interface MapFilters {
+  state: string | null; // INDIA_STATE_BBOXES id, null = all
+  riskStatuses: RiskStatus[]; // empty = all
+  frpBand: 0 | 1 | 2 | null; // FRP_BANDS index, null = all
+}
+
+export const DEFAULT_FILTERS: MapFilters = { state: null, riskStatuses: [], frpBand: null };
+
+/** FRP band index for a hotspot (mirrors frpColor thresholds). */
+export function frpBandIndex(frp: number): 0 | 1 | 2 {
+  if (frp < 2) return 0;
+  if (frp < 10) return 1;
+  return 2;
+}
 
 export const LAYERS: { id: LayerId; label: string; icon: React.ElementType }[] = [
   { id: "firms", label: "FIRMS live hotspots", icon: Flame },
@@ -60,6 +78,8 @@ export default function MapCanvas({
   selectedHotspotKey = null,
   onSelectHotspot,
   onViewport,
+  filters = DEFAULT_FILTERS,
+  onFiltersChange,
   children,
 }: {
   view: MapView;
@@ -82,10 +102,14 @@ export default function MapCanvas({
   onSelectHotspot?: (key: string | null) => void;
   /** debounced upstream — fires when the user stops moving the map */
   onViewport: (b: [number, number, number, number]) => void;
+  /** PDF §3 filters — applied by the parent to the data it passes down */
+  filters?: MapFilters;
+  onFiltersChange?: (f: MapFilters) => void;
   /** floating overlays rendered above the map (e.g. the detail slide-over) */
   children?: React.ReactNode;
 }) {
   const [tilesLoadingInternal, setTilesLoadingInternal] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   // skeleton must never stick after a failed tile event
   useEffect(() => {
@@ -134,16 +158,38 @@ export default function MapCanvas({
         >
           Global Live
         </div>
-      )}
-
-      {/* region mode pill — top-right */}
+      )}      {/* region mode pill — top-right */}
       <div
         className={clsx(
-          "absolute right-4 top-4 z-[1000] flex rounded-full border p-1 shadow-lg shadow-black/40",
-          satellite
-            ? "border-border-strong bg-bg-void/90"
-            : "border-border-hairline bg-bg-raised",
+          "absolute right-4 top-4 z-[1000] flex items-center gap-2",
         )}
+      >
+        {/* filters toggle (§3) — visible in India mode where state filter applies */}
+        <button
+          type="button"
+          onClick={() => setFiltersOpen((o) => !o)}
+          aria-expanded={filtersOpen}
+          aria-label="Map filters"
+          title="Filters"
+          className={clsx(
+            "flex h-9 w-9 items-center justify-center rounded-full border shadow-lg shadow-black/40 transition-colors duration-150",
+            filtersOpen || filters.state || filters.riskStatuses.length > 0 || filters.frpBand != null
+              ? "border-accent-primary/50 bg-accent-primary/15 text-accent-primary"
+              : satellite
+                ? "border-border-strong bg-bg-void/90 text-text-secondary hover:text-text-primary"
+                : "border-border-hairline bg-bg-raised text-text-secondary hover:text-text-primary",
+          )}
+        >
+          <SlidersHorizontal size={15} />
+        </button>
+        <div
+          className={clsx(
+            "flex rounded-full border p-1 shadow-lg shadow-black/40",
+            satellite
+              ? "border-border-strong bg-bg-void/90"
+              : "border-border-hairline bg-bg-raised",
+          )
+          }
       >
         {(
           [
@@ -165,7 +211,111 @@ export default function MapCanvas({
             {m.label}
           </button>
         ))}
+        </div>
       </div>
+
+      {/* filter panel (§3: region handled by mode pill; date by timeline;
+          persistence/FRP/state/status here) */}
+      {filtersOpen && (
+        <div
+          className={clsx(
+            "absolute right-4 top-[52px] z-[1100] w-[248px] rounded-xl border p-4 shadow-lg shadow-black/50",
+            satellite
+              ? "border-border-strong bg-bg-void/95"
+              : "border-border-hairline bg-bg-raised/95",
+          )}
+        >
+          <div className="flex items-center justify-between">
+            <span className="font-body text-[10px] font-semibold uppercase tracking-widest text-text-tertiary">
+              Filters
+            </span>
+            <button
+              type="button"
+              onClick={() => onFiltersChange?.(DEFAULT_FILTERS)}
+              className="text-[10px] text-text-tertiary transition-colors duration-150 hover:text-text-primary"
+            >
+              Reset
+            </button>
+          </div>
+
+          {/* state (India mode) */}
+          {mode === "india" && (
+            <label className="mt-3 block">
+              <span className="text-[10px] uppercase tracking-wider text-text-tertiary">State / UT</span>
+              <select
+                value={filters.state ?? ""}
+                onChange={(e) => onFiltersChange?.({ ...filters, state: e.target.value || null })}
+                className="mt-1 w-full rounded-md border border-border-hairline bg-bg-inset px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent-primary"
+              >
+                <option value="">All states</option>
+                {INDIA_STATE_BBOXES.map((s) => (
+                  <option key={s.id} value={s.id}>{s.label}</option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          {/* risk status (multi) */}
+          <div className="mt-3">
+            <span className="text-[10px] uppercase tracking-wider text-text-tertiary">Risk status</span>
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {STATUS_ORDER.map((s) => {
+                const on = filters.riskStatuses.includes(s);
+                return (
+                  <button
+                    key={s}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() =>
+                      onFiltersChange?.({
+                        ...filters,
+                        riskStatuses: on
+                          ? filters.riskStatuses.filter((x) => x !== s)
+                          : [...filters.riskStatuses, s],
+                      })
+                    }
+                    className={clsx(
+                      "rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors duration-150",
+                      on ? "text-text-primary" : "text-text-tertiary hover:text-text-secondary",
+                    )}
+                    style={
+                      on
+                        ? { backgroundColor: `${STATUS_META[s].hex}30`, color: STATUS_META[s].hex }
+                        : { border: "1px solid #1A2028" }
+                    }
+                  >
+                    {STATUS_META[s].label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* FRP band */}
+          <div className="mt-3">
+            <span className="text-[10px] uppercase tracking-wider text-text-tertiary">FRP band (hotspots)</span>
+            <div className="mt-1.5 flex gap-1">
+              {([null, 0, 1, 2] as const).map((band) => (
+                <button
+                  key={String(band)}
+                  type="button"
+                  aria-pressed={filters.frpBand === band}
+                  onClick={() => onFiltersChange?.({ ...filters, frpBand: band })}
+                  className={clsx(
+                    "flex-1 rounded-md px-1.5 py-1 font-mono text-[10px] transition-colors duration-150",
+                    filters.frpBand === band
+                      ? "bg-accent-primary/15 text-accent-primary"
+                      : "text-text-tertiary hover:text-text-secondary",
+                  )}
+                  style={filters.frpBand === band ? undefined : { border: "1px solid #1A2028" }}
+                >
+                  {band === null ? "All" : FRP_BANDS[band].label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* right control stack: basemap pill + layer toggles */}
       <div className="absolute right-4 top-[76px] z-[1000] flex flex-col items-end gap-2">

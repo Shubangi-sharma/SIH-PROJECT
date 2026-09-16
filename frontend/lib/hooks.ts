@@ -15,6 +15,7 @@ import useSWR, { SWRConfiguration } from "swr";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { parseFirmsCsv } from "./firms";
 import { fetchAnalyses, fetchCommand, fetchFacilities, fetchFirmsCsv, postChat, type ChatHistoryTurn } from "./api";
+import { fetchMlHotspots, type MlHotspotSummaryDto, type MlHotspotsResponseDto } from "./mlApi";
 import type { Facility, FacilityAnalysis, CommandView, ChatMessage } from "./types";
 import type { FacilityAnalysisDto, CommandViewDto } from "./api";
 import { BBox, bboxToString } from "./regions";
@@ -65,6 +66,7 @@ function toAnalysis(a: FacilityAnalysisDto): FacilityAnalysis {
     latestFrp: a.latestFrp,
     nearestKm: a.nearestKm,
     detectionCount: a.detectionCount,
+    liveConfidenceSplit: a.liveConfidenceSplit,
   };
 }
 
@@ -246,6 +248,44 @@ export function useCommand(options?: SWRConfiguration): {
 
   return {
     command: data ?? null,
+    error: !!error,
+    isLoading,
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* ML hotspots — pyrosense_ml catalogue via the backend proxy            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Historical + live model-predicted hotspots from pyrosense_ml, fetched
+ * through the backend's pass-through proxy (lib/mlApi.ts). Gentle
+ * revalidation: the historical seed is static; live predicts accumulate.
+ */
+const ML_HOTSPOTS_REFRESH_INTERVAL = 5 * 60 * 1000;
+
+export function useMlHotspots(
+  source: "historical" | "live" | "all" = "all",
+  options?: SWRConfiguration,
+): {
+  hotspots: MlHotspotSummaryDto[];
+  error: boolean;
+  isLoading: boolean;
+} {
+  const { data, error, isLoading } = useSWR<MlHotspotsResponseDto>(
+    ["ml-hotspots", source],
+    () =>
+      fetchMlHotspots(source === "all" ? undefined : { source }),
+    {
+      refreshInterval: ML_HOTSPOTS_REFRESH_INTERVAL,
+      revalidateOnFocus: true,
+      keepPreviousData: true,
+      ...options,
+    },
+  );
+
+  return {
+    hotspots: data?.hotspots ?? [],
     error: !!error,
     isLoading,
   };

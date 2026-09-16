@@ -112,9 +112,11 @@ def features_hash(
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
-def _strip_think(text: str) -> str:
+def _strip_think(text: str | None) -> str:
     """Remove reasoning-model leak. An unterminated <think> means the token
     budget ran out mid-thought — drop everything from <think> onward."""
+    if not text or not isinstance(text, str):
+        return ""  # provider returned null/no content — fall through to next model
     text = re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE)
     text = re.sub(r"<think>[\s\S]*$", "", text, flags=re.IGNORECASE)
     return text.strip()

@@ -55,7 +55,8 @@ Assets are dynamically scored (0–100) using a weighted algorithm that balances
 
 PyroSense operates on a decoupled, high-performance monorepo architecture designed for real-time observability.
 
-- **Backend (`/backend`)**: A robust Node.js/Express API powered by a local, ultra-fast `better-sqlite3` database operating in WAL (Write-Ahead Logging) mode. It handles cron-based orchestration, heavy geospatial compute, continuous baselining, and GenAI context injection.
+- **Backend (`/backend`)**: A robust Node.js/Express API powered by a local, ultra-fast `better-sqlite3` database operating in WAL (Write-Ahead Logging) mode. It handles cron-based orchestration, heavy geospatial compute, continuous baselining, and GenAI context injection — and **proxies the ML service** (`/api/predict`, `/api/ml/*`) so the frontend talks to exactly one API origin.
+- **ML service (`/pyrosense_ml`)**: A Python FastAPI service owning the trained Gradient Boosting classifier — a frozen 36-feature schema, auto feature engineering (FIRMS history + OSM + land cover + weather), risk scoring, prediction persistence (PostgreSQL/PostGIS), and grounded GenAI explanations.
 - **Frontend (`/frontend`)**: A visually stunning Next.js 14 App Router client leveraging React Server Components. Features include a bespoke dark-mode Tailwind UI, Leaflet-powered edge-to-edge geospatial visualization, custom map tile rendering, and timeline scrubbing transport controls.
 
 ---
@@ -77,7 +78,8 @@ PyroSense operates autonomously on a 15-minute orchestrated loop:
 ### Prerequisites
 - Node.js v18+ & npm v9+
 - A NASA FIRMS Map Key ([Get one here](https://firms.modaps.eosdis.nasa.gov/api/map_key/))
-- *(Optional)* OpenRouter API Key for the GenAI Assistant
+- Python 3.12+ with [uv](https://docs.astral.sh/uv/) and Docker (for PostgreSQL/PostGIS)
+- *(Optional)* OpenRouter API Key for the GenAI Assistant + ML explanations
 
 ### 1. Backend Initialization
 
@@ -87,7 +89,7 @@ npm install
 
 # Configure your environment
 cp .env.example .env
-# Edit .env and insert your FIRMS_MAP_KEY
+# Edit .env and insert your FIRMS_MAP_KEY (ML_API_BASE_URL defaults to :5000)
 
 # Bootstrap the SQLite database and ingest facility geometries
 npm run ingest:dataset
@@ -97,9 +99,32 @@ npm run match:detections
 npm run dev
 ```
 
-### 2. Frontend Initialization
+### 2. ML Service Initialization (PyroSense ML — classifier + explanations)
 
-In a separate terminal:
+In a second terminal:
+
+```bash
+cd pyrosense_ml
+
+# 1. PostgreSQL/PostGIS for predictions & timelines (any instance works)
+docker run -d --name pyrosense-ml-postgis \
+  -e POSTGRES_USER=pyrosense -e POSTGRES_PASSWORD=pyrosense -e POSTGRES_DB=pyrosense_ml \
+  -p 5433:5432 postgis/postgis:16-3.4
+
+# 2. Configure (DATABASE_URL / SQLITE_PATH / MODEL_PATH defaults are sane)
+cp .env.example .env
+
+# 3. Launch — loads the model, creates the schema, seeds historical hotspots
+uv run python -m app.main        # http://localhost:5000
+```
+
+The Node backend proxies `POST /api/predict` and `GET /api/ml/hotspots` to
+this service (see `docs/api-contract.md`) — the frontend needs only
+`NEXT_PUBLIC_API_BASE_URL`. Full API reference: `pyrosense_ml/README.md`.
+
+### 3. Frontend Initialization
+
+In a third terminal:
 
 ```bash
 cd frontend

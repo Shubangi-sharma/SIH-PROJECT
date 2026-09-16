@@ -20,7 +20,6 @@ import {
   classifyFromDetections,
   CRITICAL_FRP_RATIO,
   formatDeltaPct,
-  isUsable,
   RiskStatus,
   SUSPICIOUS_FRP_RATIO,
   USABLE_CONFIDENCE,
@@ -45,6 +44,28 @@ export interface FacilityAnalysis {
   liveCount: number;
   liveMeanFrp: number | null;
   baselineMeanFrp: number | null;
+  /** VIIRS confidence-band split of the live window (Signal Quality, C2). */
+  liveConfidenceSplit: { high: number; nominal: number; low: number };
+}
+
+/** Persistence block — computed from the stored FIRMS archive (PDF §4). */
+export interface PersistenceBlock {
+  totalDetections: number;
+  uniqueDays: number;
+  activeDurationDays: number | null;
+  firstDetectionDate: string | null;
+  lastDetectionDate: string | null;
+}
+
+/** Fire characteristics block — computed from stored detections (PDF §4). */
+export interface FireCharacteristicsBlock {
+  meanFrp: number | null;
+  maxFrp: number | null;
+  minFrp: number | null;
+  latestBrightnessK: number | null;
+  dayNightSplit: { day: number; night: number };
+  confidenceSplit: Record<string, number>;
+  satelliteSplit: Record<string, number>;
 }
 
 export interface WhatChangedRow {
@@ -155,6 +176,7 @@ export function analyzeAllFacilities(
         liveCount: c.liveCount,
         liveMeanFrp: c.liveMeanFrp,
         baselineMeanFrp: c.baseline ? c.baseline.mean : null,
+        liveConfidenceSplit: c.liveConfidenceSplit,
       });
     }
   }
@@ -166,7 +188,13 @@ export function analyzeFacility(
   facility: FacilityRow,
   todayUtc0: Date,
   radiusKm: number = FACILITY_RADIUS_KM,
-): { classification: Classification; narrative: FacilityNarrative; facts: SummaryFacts } {
+): {
+  classification: Classification;
+  narrative: FacilityNarrative;
+  facts: SummaryFacts;
+  persistence: PersistenceBlock;
+  fireCharacteristics: FireCharacteristicsBlock;
+} {
   const todayUtc = todayUtc0;
   const fromDate = dateDaysAgo(HISTORY_WINDOW_DAYS, todayUtc);
   const box = getDetectionsNear(facility.lat, facility.lng, radiusKm + 1, fromDate);
@@ -240,7 +268,56 @@ export function analyzeFacility(
   };
 
   const narrative = buildNarrative(facility, c, usable, ages, facts);
-  return { classification: c, narrative, facts };
+
+  // ── Persistence + fire characteristics — computed from the SAME stored
+  //    detections the classification used (no invented data, PDF §4).
+  const allDates = [...new Set(usable.map((d) => d.acq_date))].sort();
+  const frps = usable.map((d) => d.frp).filter((v) => Number.isFinite(v));
+  const dayNightSplit = { day: 0, night: 0 };
+  for (const d of usable) {
+    if (d.daynight === "N") dayNightSplit.night += 1;
+    else dayNightSplit.day += 1;
+  }
+  const confidenceSplit: Record<string, number> = {};
+  const satelliteSplit: Record<string, number> = {};
+  for (const d of usable) {
+    const conf = (d.confidence || "unknown").toLowerCase();
+    confidenceSplit[conf] = (confidenceSplit[conf] ?? 0) + 1;
+    const sat = d.satellite || "unknown";
+    satelliteSplit[sat] = (satelliteSplit[sat] ?? 0) + 1;
+  }
+  const persistence: PersistenceBlock = {
+    totalDetections: usable.length,
+    uniqueDays: allDates.length,
+    activeDurationDays:
+      allDates.length >= 2
+        ? Math.round(
+            (Date.UTC(...(strToUtc(allDates[allDates.length - 1]!))) -
+              Date.UTC(...(strToUtc(allDates[0]!)))) /
+              86_400_000,
+          )
+        : null,
+    firstDetectionDate: allDates[0] ?? null,
+    lastDetectionDate: allDates[allDates.length - 1] ?? null,
+  };
+  const latestRow = usable[0] ?? null;
+  const fireCharacteristics: FireCharacteristicsBlock = {
+    meanFrp: frps.length ? mean(frps) : null,
+    maxFrp: frps.length ? Math.max(...frps) : null,
+    minFrp: frps.length ? Math.min(...frps) : null,
+    latestBrightnessK: latestRow?.bright_ti4 ?? null,
+    dayNightSplit,
+    confidenceSplit,
+    satelliteSplit,
+  };
+
+  return { classification: c, narrative, facts, persistence, fireCharacteristics };
+}
+
+/** "YYYY-MM-DD" → [y, m-1, d] for Date.UTC spread. */
+function strToUtc(date: string): [number, number, number] {
+  const [y, m, d] = date.split("-").map(Number);
+  return [y ?? 1970, (m ?? 1) - 1, d ?? 1];
 }
 
 /* ── What Changed? + timeline (computed diffs, no template bank) ───────── */

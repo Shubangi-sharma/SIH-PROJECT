@@ -13,7 +13,8 @@
     "ingest:facilities": "tsx src/jobs/ingestFacilities.ts",
     "ingest:dataset": "tsx src/jobs/ingestUserDataset.ts",
     "refresh:firms": "tsx src/jobs/refreshLiveFirms.ts",
-    "match:detections": "tsx src/jobs/runMatching.ts"
+    "match:detections": "tsx src/jobs/runMatching.ts",
+    "verify:confidence": "tsx src/scripts/verifyConfidenceWeighting.ts"
   },
   "dependencies": {
     "better-sqlite3": "^11.3.0",

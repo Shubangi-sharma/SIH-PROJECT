@@ -19,6 +19,32 @@
  *   weightedMean     = Σ wᵢ·frpᵢ / Σ wᵢ
  *   weightedVariance = Σ wᵢ·(frpᵢ − μ)² / Σ wᵢ   (reliability-style weights)
  *
+ * ── CONFIDENCE WEIGHTING (combined with recency) ────────────────────────
+ *
+ * Recency is only half of "how much should this detection move the
+ * baseline?". FIRMS VIIRS ships a per-detection confidence band, and until
+ * now that band was used solely as an inclusion gate (isUsable) — after
+ * inclusion every detection carried equal weight, so one low-confidence
+ * sensor artifact counted the same as a textbook high-confidence sighting.
+ *
+ * Each usable detection now carries a multiplicative confidence weight on
+ * top of its recency weight:
+ *
+ *   h / high      → 1.0   (strong radiance + cloud-mask match)
+ *   n / nominal, m / medium, "" → 0.7   (nominal band — usable, softer)
+ *   l / low       → 0.4   (elevated noise/cloud likelihood)
+ *
+ * Combined weight:  wᵢ = recency(ageDays) × confidence(band)
+ *
+ * The two factors are deliberately independent and multiplicative:
+ * recency models WHEN evidence was seen, confidence models HOW
+ * trustworthy each sighting is. Multiplying (not discarding) keeps weak
+ * evidence in play at reduced voice — important for facilities with short
+ * histories, where dropping low-band rows entirely could erase the only
+ * signal. The same weighting is applied to live-window FRP aggregation so
+ * "recent behaviour" is also quality-weighted, and the band split is
+ * exposed as Signal Quality for the operator (C2).
+ *
  * Documented in code because this is real analytical logic, not decoration.
  *
  * ── CLASSIFICATION ──────────────────────────────────────────────────────
@@ -53,6 +79,56 @@ export const USABLE_CONFIDENCE = new Set(["h", "high", "m", "medium", "n", "nomi
 export const isUsable = (d: DetectionRow): boolean =>
   USABLE_CONFIDENCE.has(d.confidence.toLowerCase());
 
+/* ── confidence weighting (applied AFTER inclusion) ───────────────────── */
+
+export type ConfidenceBand = "high" | "nominal" | "low";
+
+/**
+ * VIIRS confidence band → evidence weight (see module docblock).
+ * Band names follow FIRMS VIIRS's own vocabulary: l / n / h → low /
+ * nominal / high. "" (missing band) and m/medium are treated as nominal:
+ * usable, softer than high.
+ */
+export const CONFIDENCE_WEIGHTS: Record<ConfidenceBand, number> = {
+  high: 1.0,
+  nominal: 0.7,
+  low: 0.4,
+};
+
+export function confidenceBand(confidence: string): ConfidenceBand {
+  switch (confidence.trim().toLowerCase()) {
+    case "h":
+    case "high":
+      return "high";
+    case "l":
+    case "low":
+      return "low";
+    default:
+      // n / nominal / m / medium / "" — everything usable-but-not-high.
+      return "nominal";
+  }
+}
+
+export function confidenceWeight(confidence: string): number {
+  return CONFIDENCE_WEIGHTS[confidenceBand(confidence)];
+}
+
+/** Confidence-weighted mean FRP — the live-window aggregation uses this too. */
+export function confidenceWeightedMean(
+  frps: { frp: number; confidence: string }[],
+): number {
+  if (frps.length === 0) return 0;
+  let wsum = 0;
+  let wfrp = 0;
+  for (const { frp, confidence } of frps) {
+    const w = confidenceWeight(confidence);
+    wsum += w;
+    wfrp += w * frp;
+  }
+  // Degenerate guard: fall back to the plain mean if all weights vanish.
+  return wsum > 0 ? wfrp / wsum : mean(frps.map((f) => f.frp));
+}
+
 /* ── weighted baseline ─────────────────────────────────────────────────── */
 
 export interface WeightedBaseline {
@@ -68,14 +144,15 @@ export function baselineWeight(ageDays: number): number {
 }
 
 export function computeWeightedBaseline(
-  frps: { frp: number; ageDays: number }[],
+  frps: { frp: number; ageDays: number; confidence: string }[],
 ): WeightedBaseline | null {
   if (frps.length === 0) return null;
   let wsum = 0;
   let wfrp = 0;
   let maxAge = 0;
-  for (const { frp, ageDays } of frps) {
-    const w = baselineWeight(ageDays);
+  for (const { frp, ageDays, confidence } of frps) {
+    // Recency × confidence: when it was seen × how much to trust it.
+    const w = baselineWeight(ageDays) * confidenceWeight(confidence);
     wsum += w;
     wfrp += w * frp;
     if (ageDays > maxAge) maxAge = ageDays;
@@ -83,8 +160,8 @@ export function computeWeightedBaseline(
   if (wsum <= 0) return null;
   const mean = wfrp / wsum;
   let wvar = 0;
-  for (const { frp, ageDays } of frps) {
-    const w = baselineWeight(ageDays);
+  for (const { frp, ageDays, confidence } of frps) {
+    const w = baselineWeight(ageDays) * confidenceWeight(confidence);
     wvar += w * (frp - mean) ** 2;
   }
   return {
@@ -110,6 +187,8 @@ export interface Classification {
   liveCount: number;
   liveMeanFrp: number | null;
   livePeakFrp: number | null;
+  /** VIIRS confidence-band split of the live window (Signal Quality, C2). */
+  liveConfidenceSplit: { high: number; nominal: number; low: number };
   baseline: WeightedBaseline | null;
   newDetectionsLast5d: number;
   newDetectionsPriorNearby: number;
@@ -205,6 +284,17 @@ export function classifyFromDetections(input: ClassifyInput): Classification {
 
   const nearestKm = withDist.length ? withDist[0]!.dist : null;
 
+  // Signal Quality source data (C2): confidence-band split of ALL nearby
+  // live-window detections — INCLUDING the low-band rows the quality gate
+  // excludes — so the operator sees the true quality mix. "low" here means
+  // "present but excluded from scoring", never silently dropped.
+  const liveConfidenceSplit = { high: 0, nominal: 0, low: 0 };
+  for (const x of withDist) {
+    if (ageDaysBetween(x.d.acq_date, todayUtc) < LIVE_WINDOW_DAYS) {
+      liveConfidenceSplit[confidenceBand(x.d.confidence)] += 1;
+    }
+  }
+
   const newest = [...withDist].sort((a, b) =>
     a.d.acq_date < b.d.acq_date
       ? 1
@@ -234,6 +324,7 @@ export function classifyFromDetections(input: ClassifyInput): Classification {
       liveCount: 0,
       liveMeanFrp: null,
       livePeakFrp: null,
+      liveConfidenceSplit,
       baseline: null,
       newDetectionsLast5d: 0,
       newDetectionsPriorNearby: 0,
@@ -245,13 +336,18 @@ export function classifyFromDetections(input: ClassifyInput): Classification {
   );
 
   // LIVE window = recent behaviour; BASELINE = full stored history.
+  // Both aggregations are confidence-weighted (recency × confidence): see
+  // the module docblock. livePeak stays an unweighted max — a peak is a
+  // physical observation, not an estimate.
   const live = usable.filter((x) => ages.get(x)! < LIVE_WINDOW_DAYS);
   const liveFrps = live.map((x) => x.d.frp);
-  const liveMean = liveFrps.length ? mean(liveFrps) : mean(usable.map((x) => x.d.frp));
+  const liveWeighted = (rows: typeof usable) =>
+    confidenceWeightedMean(rows.map((x) => ({ frp: x.d.frp, confidence: x.d.confidence })));
+  const liveMean = liveFrps.length ? liveWeighted(live) : liveWeighted(usable);
   const livePeak = liveFrps.length ? Math.max(...liveFrps) : Math.max(...usable.map((x) => x.d.frp));
 
   const baseline = computeWeightedBaseline(
-    usable.map((x) => ({ frp: x.d.frp, ageDays: ages.get(x)! })),
+    usable.map((x) => ({ frp: x.d.frp, ageDays: ages.get(x)!, confidence: x.d.confidence })),
   );
 
   // ── new detection (vs the FULL prior baseline, not a 10-day early half) ──
@@ -316,6 +412,7 @@ export function classifyFromDetections(input: ClassifyInput): Classification {
     liveCount: live.length,
     liveMeanFrp: liveFrps.length ? liveMean : null,
     livePeakFrp: liveFrps.length ? livePeak : null,
+    liveConfidenceSplit,
     baseline: trustedBaseline,
     newDetectionsLast5d: newDetections.length,
     newDetectionsPriorNearby: prior.length,

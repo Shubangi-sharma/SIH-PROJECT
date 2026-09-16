@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { ArrowLeft, Satellite } from "lucide-react";
 import { StatusBadge } from "@/lib/status";
+import SignalQualityBadge from "@/components/SignalQualityBadge";
 import HealthScoreRing from "@/components/HealthScoreRing";
 import WhatChangedPanel from "@/components/WhatChangedPanel";
 import AiSummaryBlock from "@/components/AiSummaryBlock";
@@ -30,6 +31,42 @@ function MonoStat({ label, value }: { label: string; value: string }) {
       </div>
     </div>
   );
+}
+
+/** Section shell for PDF §4 field groups with an honest empty state. */
+function FieldGroupSection({
+  title,
+  note,
+  empty,
+  children,
+}: {
+  title: string;
+  note?: string;
+  empty?: boolean;
+  children?: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-xl bg-bg-surface p-5">
+      <h3 className="font-display text-sm font-semibold text-text-primary">{title}</h3>
+      {note && <p className="mt-1 text-[11px] leading-relaxed text-text-tertiary">{note}</p>}
+      {empty ? (
+        <p className="mt-3 rounded-lg border border-border-hairline bg-bg-raised px-3 py-2 text-xs leading-relaxed text-text-secondary">
+          Not measured for this facility — these observations are computed
+          during ML feature engineering, not stored per facility. Run the
+          Predict page on this facility&apos;s coordinates to generate them.
+        </p>
+      ) : (
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">{children}</div>
+      )}
+    </section>
+  );
+}
+
+/** Highest-count entry of a split map, e.g. satellites. */
+function topSplit(split: Record<string, number>): string {
+  const entries = Object.entries(split);
+  if (entries.length === 0) return "—";
+  return entries.sort((a, b) => b[1] - a[1])[0]![0];
 }
 
 export default function FacilityDetailPage() {
@@ -72,7 +109,10 @@ export default function FacilityDetailPage() {
   }, [osmId]);
 
   const facility = analysis?.facility;
-  const status = analysis?.classification.status as RiskStatus | undefined;
+  const cls = typeof analysis?.classification === "string" ? null : analysis?.classification;
+  const status = (cls?.status ?? (analysis?.classification as RiskStatus | undefined)) as
+    | RiskStatus
+    | undefined;
 
   const [satellite, setSatellite] = useState(false);
   useEffect(() => {
@@ -97,7 +137,7 @@ export default function FacilityDetailPage() {
     );
   }
 
-  if (!analysis || !facility || !status) {
+  if (!analysis || !facility || !status || !cls) {
     return (
       <div className="pyro-scroll h-full overflow-y-auto">
         <div className="mx-auto flex max-w-[1200px] flex-col gap-6 p-6 pb-20">
@@ -115,7 +155,23 @@ export default function FacilityDetailPage() {
     whatChanged: analysis.narrative.whatChanged,
     timeline: analysis.narrative.timeline,
   };
-  const c = analysis.classification;
+  const c = cls;
+  const p = analysis.persistence ?? {
+    totalDetections: 0,
+    uniqueDays: 0,
+    activeDurationDays: null,
+    firstDetectionDate: null,
+    lastDetectionDate: null,
+  };
+  const fc = analysis.fireCharacteristics ?? {
+    meanFrp: null,
+    maxFrp: null,
+    minFrp: null,
+    latestBrightnessK: null,
+    dayNightSplit: { day: 0, night: 0 },
+    confidenceSplit: {},
+    satelliteSplit: {},
+  };
 
   return (
     <div className="pyro-scroll h-full overflow-y-auto">
@@ -148,6 +204,7 @@ export default function FacilityDetailPage() {
           <div className="flex flex-col gap-6">
             <section className="flex flex-col items-center gap-5 rounded-xl bg-bg-surface p-6">
               <HealthScoreRing score={c.score} status={status} />
+              <SignalQualityBadge split={c.liveConfidenceSplit} />
               <div className="grid w-full grid-cols-2 gap-3">
                 <MonoStat
                   label="FRP (latest)"
@@ -204,8 +261,76 @@ export default function FacilityDetailPage() {
           {/* RIGHT: narrative stack — computed by the backend, AI grounded in facts */}
           <div className="flex min-w-0 flex-col gap-6">
             <WhatChangedPanel rows={narrative.whatChanged} />
+
+            {/* PDF §4: Persistence group — computed from the stored archive */}
+            <FieldGroupSection title="Persistence">
+              <MonoStat
+                label="Total detections"
+                value={p.totalDetections > 0 ? String(p.totalDetections) : "none"}
+              />
+              <MonoStat
+                label="Unique active days"
+                value={p.uniqueDays > 0 ? String(p.uniqueDays) : "—"}
+              />
+              <MonoStat
+                label="Active duration"
+                value={p.activeDurationDays != null ? `${p.activeDurationDays} days` : "—"}
+              />
+              <MonoStat label="First detection" value={p.firstDetectionDate ?? "—"} />
+              <MonoStat label="Last detection" value={p.lastDetectionDate ?? "—"} />
+            </FieldGroupSection>
+
+            {/* PDF §4: Fire characteristics group */}
+            <FieldGroupSection title="Fire characteristics">
+              <MonoStat
+                label="Mean FRP"
+                value={fc.meanFrp != null ? `${fc.meanFrp.toFixed(1)} MW` : "—"}
+              />
+              <MonoStat
+                label="Peak FRP"
+                value={fc.maxFrp != null ? `${fc.maxFrp.toFixed(1)} MW` : "—"}
+              />
+              <MonoStat
+                label="Min FRP"
+                value={fc.minFrp != null ? `${fc.minFrp.toFixed(1)} MW` : "—"}
+              />
+              <MonoStat
+                label="Latest brightness"
+                value={fc.latestBrightnessK != null ? `${fc.latestBrightnessK.toFixed(0)} K` : "—"}
+              />
+              <MonoStat
+                label="Day / night passes"
+                value={`${fc.dayNightSplit.day} / ${fc.dayNightSplit.night}`}
+              />
+              <MonoStat
+                label="Top satellite"
+                value={topSplit(fc.satelliteSplit)}
+              />
+            </FieldGroupSection>
+
+            {/* PDF §4: Land cover + Surroundings — six ratios / six distances.
+                These are engineered per-point during ML prediction (not
+                stored per facility), so the honest state is a pointer to the
+                Predict page — never fabricated numbers (info.md rule). */}
+            <FieldGroupSection
+              title="Land cover"
+              note="Six Dynamic Earth land-cover ratios around the point."
+              empty
+            />
+            <FieldGroupSection
+              title="Surroundings"
+              note="Distances to industrial, power, mining, fuel-storage, agriculture and transport infrastructure."
+              empty
+            />
+            <FieldGroupSection
+              title="Weather"
+              note="Temperature, wind, dewpoint, precipitation and solar radiation aggregates."
+              empty
+            />
+
             <AiSummaryBlock
               text={summary?.text ?? "Generating grounded summary…"}
+              provider={summary?.provider}
             />
             <IncidentTimeline events={narrative.timeline} />
           </div>

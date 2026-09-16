@@ -3,17 +3,26 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Satellite, X } from "lucide-react";
-import MapCanvas, { LayerId, MapMode } from "@/components/MapCanvas";
+import MapCanvas, {
+  DEFAULT_FILTERS,
+  frpBandIndex,
+  LayerId,
+  MapFilters,
+  MapMode,
+} from "@/components/MapCanvas";
 import HealthScoreRing from "@/components/HealthScoreRing";
+import SignalQualityBadge from "@/components/SignalQualityBadge";
 import WhatChangedPanel from "@/components/WhatChangedPanel";
 import AiSummaryBlock from "@/components/AiSummaryBlock";
 import IncidentTimeline from "@/components/IncidentTimeline";
 import TimelineSlider from "@/components/TimelineSlider";
+import ReplayControls from "@/components/ReplayControls";
+import { useReplay, replayActiveEventIndex } from "@/lib/replay";
 import { FirmsHotspotDetail } from "@/components/MapMarkerTooltips";
 import type { Basemap, MapView } from "@/components/MapInner";
 import { useDebounced, useAnalyses, useFirms } from "@/lib/hooks";
 import { fetchFacilityAnalysis, fetchSummary } from "@/lib/api";
-import { BBox, REGION_BBOXES } from "@/lib/regions";
+import { BBox, REGION_BBOXES, stateForPoint } from "@/lib/regions";
 import { FacilityNarrative, RiskStatus, statusColorHex } from "@/lib/types";
 import { FirmsHotspot, frpColor } from "@/lib/firms";
 import { haversineKm } from "@/lib/geo";
@@ -82,6 +91,9 @@ export default function MapPage() {
   });
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  /* -------- §3 filters: state, risk status, FRP band -------- */
+  const [filters, setFilters] = useState<MapFilters>(DEFAULT_FILTERS);
+
   /* -------- selected FIRMS hotspot ("pinned" for study) -------- */
   const [selectedHotspotKey, setSelectedHotspotKey] = useState<string | null>(null);
   const handleSelectHotspot = useCallback((key: string | null) => {
@@ -112,15 +124,8 @@ export default function MapPage() {
     isLoading: firmsLoading,
   } = useFirms(fetchBboxes);
 
-  /* -------- timeline date filter -------- */
+  /* -------- timeline date filter + §3 attribute filters -------- */
   const [filterDate, setFilterDate] = useState<string | null>(null);
-  const filteredHotspots = useMemo(
-    () =>
-      filterDate
-        ? hotspots.filter((h) => h.acqDate === filterDate)
-        : hotspots,
-    [hotspots, filterDate],
-  );
 
   /* -------- selected facility: backend narrative + grounded AI summary ------- */
 
@@ -128,6 +133,43 @@ export default function MapPage() {
     () => analyses.find((a) => a.facility.id === selectedId) ?? null,
     [analyses, selectedId],
   );
+
+  /* -------- facility-scoped replay (Track B) --------
+     Activates only after a facility is selected (B1). One shared state
+     drives the map markers, the replay label, the incident-timeline
+     highlight and the "Today's assessment" caption together (B2). */
+  const replay = useReplay(hotspots, selected?.facility ?? null);
+
+  const filteredHotspots = useMemo(
+    () =>
+      hotspots
+        .filter((h) =>
+          // replay filter wins while a step is shown; else the scrubber's date
+          replay.currentDate && selected
+            ? h.acqDate === replay.currentDate &&
+              haversineKm(selected.facility.lat, selected.facility.lng, h.latitude, h.longitude) <= 5
+            : filterDate
+              ? h.acqDate === filterDate
+              : true,
+        )
+        .filter((h) => (filters.frpBand != null ? frpBandIndex(h.frp) === filters.frpBand : true)),
+    [hotspots, filterDate, replay.currentDate, selected, filters.frpBand],
+  );
+
+  /** Analyses narrowed by state bbox + selected risk statuses. */
+  const filteredAnalyses = useMemo(
+    () =>
+      analyses
+        .filter((a) =>
+          filters.state ? stateForPoint(a.facility.lat, a.facility.lng) === filters.state : true,
+        )
+        .filter((a) =>
+          filters.riskStatuses.length > 0 ? filters.riskStatuses.includes(a.status) : true,
+        ),
+    [analyses, filters.state, filters.riskStatuses],
+  );
+
+  /* -------- selected facility: backend narrative + grounded AI summary ------- */
 
   /** The pinned FIRMS hotspot object, resolved from its marker key. */
   const selectedHotspot: FirmsHotspot | null = useMemo(() => {
@@ -256,7 +298,7 @@ export default function MapPage() {
       <div className="relative min-h-0 flex-1">
         <MapCanvas
           view={view}
-          analyses={analyses}
+          analyses={filteredAnalyses}
           selectedId={selectedId}
           onSelect={handleSelect}
           mode={mode}
@@ -270,6 +312,8 @@ export default function MapPage() {
           selectedHotspotKey={selectedHotspotKey}
           onSelectHotspot={handleSelectHotspot}
           onViewport={handleViewport}
+          filters={filters}
+          onFiltersChange={setFilters}
         >
           {/* FIRMS feed status — always honest: live count or explicit error */}
           <div
@@ -289,15 +333,22 @@ export default function MapPage() {
             />
             {firmsError
               ? "FIRMS feed unavailable"
-              : `VIIRS · ${filteredHotspots.length} detections${filterDate ? ` (${filterDate})` : " (10d)"}`}
+              : replay.currentDate
+                ? `VIIRS · replay ${replay.label} · ${replay.currentDate}`
+                : `VIIRS · ${filteredHotspots.length} detections${filterDate ? ` (${filterDate})` : " (10d)"}${filters.frpBand != null ? " · FRP filtered" : ""}`}
           </div>
 
-          {/* timeline slider */}
-          <TimelineSlider
-            hotspots={hotspots}
-            onFilterDate={setFilterDate}
-            className="absolute bottom-4 left-4 right-[420px] z-[1000]"
-          />
+          {/* timeline scrubber (hide while replay owns the date filter) */}
+          {!replay.currentDate && (
+            <TimelineSlider
+              hotspots={hotspots}
+              onFilterDate={setFilterDate}
+              className="absolute bottom-4 left-4 right-[420px] z-[1000]"
+            />
+          )}
+
+          {/* replay transport — appears only when a facility is selected (B1) */}
+          <ReplayControls replay={replay} className="absolute bottom-4 left-4 z-[1000]" />
 
           {/* backend status chips */}
           {analysesError && (
@@ -350,9 +401,23 @@ export default function MapPage() {
 
                 {narrative ? (
                   <div className="pyro-scroll flex-1 space-y-5 overflow-y-auto p-5">
-                    {/* health signal — the ONE prominent status element */}
+                    {/* health signal — the ONE prominent status element.
+                        B3: during replay the ring is explicitly labelled
+                        "Today's assessment" — historical scores are not
+                        recomputed, only real detections replay. */}
                     <div className="flex items-center gap-5 rounded-xl bg-bg-surface p-5">
-                      <HealthScoreRing score={selected.score} status={selected.status as RiskStatus} />
+                      <div className="flex flex-col items-center gap-2">
+                        <HealthScoreRing score={selected.score} status={selected.status as RiskStatus} />
+                        {replay.active && (
+                          <span
+                            className="rounded-full bg-bg-raised px-2 py-0.5 text-center font-mono text-[9px] uppercase tracking-wider text-text-tertiary"
+                            title="Scores are computed against today's data; replay shows real detections only"
+                          >
+                            Today&apos;s assessment
+                          </span>
+                        )}
+                        <SignalQualityBadge split={selected.liveConfidenceSplit} className="w-[150px]" />
+                      </div>
                       <div className="ml-auto grid w-[150px] grid-cols-1 gap-2">
                         <MonoStat label="Type" value={selected.facility.type} />
                         <MonoStat
@@ -418,8 +483,11 @@ export default function MapPage() {
                     )}
 
                     <WhatChangedPanel rows={narrative.whatChanged} />
-                    <AiSummaryBlock text={summary?.text ?? "Generating grounded summary…"} />
-                    <IncidentTimeline events={narrative.timeline} />
+                    <AiSummaryBlock text={summary?.text ?? "Generating grounded summary…"} provider={summary?.provider} />
+                    <IncidentTimeline
+                      events={narrative.timeline}
+                      activeIndex={replayActiveEventIndex(narrative.timeline, replay)}
+                    />
 
                     <button
                       type="button"

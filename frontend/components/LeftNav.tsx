@@ -4,9 +4,12 @@ import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  BarChart3,
   ChevronsLeft,
   ChevronsRight,
+  Crosshair,
   Factory,
+  Info,
   LayoutDashboard,
   Map as MapIcon,
   MessageCircle,
@@ -14,9 +17,16 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 
+/**
+ * Superset of the brief's suggested order (Dashboard | Hotspot Map |
+ * Analytics | Predict | About System) plus the pages already built.
+ */
 export const NAV_ITEMS = [
   { href: "/", label: "Command Dashboard", icon: LayoutDashboard },
-  { href: "/map", label: "Live Map", icon: MapIcon },
+  { href: "/map", label: "Hotspot Map", icon: MapIcon },
+  { href: "/analytics", label: "Analytics", icon: BarChart3 },
+  { href: "/predict", label: "Predict", icon: Crosshair },
+  { href: "/about", label: "About System", icon: Info },
   { href: "/facilities", label: "Facility Explorer", icon: Factory },
   { href: "/chat", label: "AI Assistant", icon: MessageCircle },
   { href: "/settings", label: "Settings", icon: Settings },

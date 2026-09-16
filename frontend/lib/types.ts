@@ -71,6 +71,11 @@ export interface FacilityAnalysis {
   nearestKm: number | null;
   /** Usable detections within the radius in the live window. */
   detectionCount: number;
+  /**
+   * VIIRS confidence-band split of the live window (backend Track C).
+   * Optional: older cached analyses may predate the field.
+   */
+  liveConfidenceSplit?: { high: number; nominal: number; low: number };
 }
 
 export const STATUS_ORDER: RiskStatus[] = [

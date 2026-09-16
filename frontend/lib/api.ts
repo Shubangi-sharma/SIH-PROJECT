@@ -45,6 +45,11 @@ export interface FacilityAnalysisDto {
   liveCount: number;
   liveMeanFrp: number | null;
   baselineMeanFrp: number | null;
+  /**
+   * VIIRS confidence-band split of the live window (backend Track C).
+   * `low` counts gated-out rows too — Signal Quality shows the real mix.
+   */
+  liveConfidenceSplit?: { high: number; nominal: number; low: number };
 }
 
 export interface WhatChangedRowDto {
@@ -64,22 +69,50 @@ export interface NarrativeDto {
   whatChanged: WhatChangedRowDto[];
   timeline: DetectionEventDto[];
   templatedSummary: string;
+  /** "openrouter" when LLM-generated, "template" for the fallback. */
+  provider?: "openrouter" | "template";
+}
+
+/** PDF §4 persistence group — computed from the stored FIRMS archive. */
+export interface PersistenceBlockDto {
+  totalDetections: number;
+  uniqueDays: number;
+  activeDurationDays: number | null;
+  firstDetectionDate: string | null;
+  lastDetectionDate: string | null;
+}
+
+/** PDF §4 fire-characteristics group — computed from stored detections. */
+export interface FireCharacteristicsBlockDto {
+  meanFrp: number | null;
+  maxFrp: number | null;
+  minFrp: number | null;
+  latestBrightnessK: number | null;
+  dayNightSplit: { day: number; night: number };
+  confidenceSplit: Record<string, number>;
+  satelliteSplit: Record<string, number>;
 }
 
 export interface FacilityAnalysisResponseDto {
   facility: FacilityDto;
-  classification: {
-    status: FacilityAnalysisDto["status"];
-    score: number;
-    latestFrp: number | null;
-    latestTimestampUtc: string | null;
-    nearestKm: number | null;
-    detectionCount: number;
-    liveCount: number;
-    liveMeanFrp: number | null;
-    baselineMeanFrp: number | null;
-  };
+  classification:
+    | FacilityAnalysisDto["status"]
+    | {
+        status: FacilityAnalysisDto["status"];
+        score: number;
+        latestFrp: number | null;
+        latestTimestampUtc: string | null;
+        nearestKm: number | null;
+        detectionCount: number;
+        liveCount: number;
+        liveMeanFrp: number | null;
+        baselineMeanFrp: number | null;
+        liveConfidenceSplit?: { high: number; nominal: number; low: number };
+      };
   narrative: NarrativeDto;
+  /** PDF §4 groups (optional: older backends may omit them). */
+  persistence?: PersistenceBlockDto;
+  fireCharacteristics?: FireCharacteristicsBlockDto;
 }
 
 export interface SummaryResponseDto {
