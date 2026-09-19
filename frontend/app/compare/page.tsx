@@ -13,7 +13,7 @@
  * anywhere in the app survive the navigation here.
  */
 
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Bar,
@@ -296,7 +296,8 @@ function CompareCard({
   onRemove: () => void;
 }) {
   const a = analysis;
-  void a;
+
+  return (
     <div className="flex flex-col gap-4 rounded-xl bg-bg-surface p-5">
       <div className="flex items-start gap-2">
         <span className="mt-1.5 inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ backgroundColor: color }} />

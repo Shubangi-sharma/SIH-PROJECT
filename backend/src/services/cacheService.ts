@@ -25,12 +25,22 @@ const FACILITY_TTL_MS = 24 * 60 * 60 * 1000; // OSM sites barely change
 const summaryCache = new LRUCache<string, nonNullableObject>({ max: 500, ttl: SUMMARY_TTL_MS });
 const analysisCache = new LRUCache<string, nonNullableObject>({ max: 100, ttl: ANALYSIS_TTL_MS });
 const facilityCache = new LRUCache<string, nonNullableObject>({ max: 50, ttl: FACILITY_TTL_MS });
+/**
+ * Serialized FIRMS CSV responses (bbox + dayRange keyed). Serializing up to
+ * 100k rows is the single most expensive per-request operation in the app —
+ * caching the finished string turns a ~100ms query+join+serialize into a
+ * Map lookup. TTL matches the HTTP max-age the route already advertises;
+ * ingestion jobs clear it via invalidateDataCaches().
+ */
+const FIRMS_CSV_TTL_MS = 5 * 60 * 1000;
+const firmsCsvCache = new LRUCache<string, string>({ max: 40, ttl: FIRMS_CSV_TTL_MS });
 
 /** Invalidate everything derived from detection data (call after ingestion). */
 export function invalidateDataCaches(): void {
-  const n = summaryCache.size + analysisCache.size;
+  const n = summaryCache.size + analysisCache.size + firmsCsvCache.size;
   summaryCache.clear();
   analysisCache.clear();
+  firmsCsvCache.clear();
   log.info({ cleared: n }, "data caches invalidated");
 }
 
@@ -44,7 +54,17 @@ export const cacheKeys = {
   facilities: "facilities:all" as const,
   analyses: (bbox: string, from: string, to: string) => `analyses:${bbox}:${from}:${to}`,
   summary: (facilityId: string, factsHash: string) => `summary:${facilityId}:${factsHash}`,
+  firmsCsv: (bbox: string, dayRange: number) => `firms-csv:${bbox}:${dayRange}`,
 };
+
+/** Through-cache for serialized FIRMS CSV responses (detection-data keyed). */
+export function getFirmsCsvCached(key: string, loader: () => string): string {
+  const hit = firmsCsvCache.get(key);
+  if (hit !== undefined) return hit;
+  const value = loader();
+  firmsCsvCache.set(key, value);
+  return value;
+}
 
 /** Through-cache for the facility list (24 h TTL — OSM sites barely change). */
 export function getFacilitiesCached<T extends object>(loader: () => T): T {

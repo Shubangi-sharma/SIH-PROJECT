@@ -17,14 +17,19 @@ import {
   STATUS_ORDER,
 } from "@/lib/types";
 import { FirmsHotspot, FRP_BANDS } from "@/lib/firms";
-import type { Basemap, MapView } from "./MapInner";
 import { INDIA_STATE_BBOXES } from "@/lib/regions";
+import type { Basemap, MapView } from "./MapInner";
 import { StatusLegendRow } from "@/lib/status";
+import MapErrorBoundary from "./MapErrorBoundary";
 import clsx from "clsx";
 
 const MapInner = dynamic(() => import("./MapInner"), {
   ssr: false,
-  loading: () => null,
+  loading: () => (
+    <div className="flex h-full w-full items-center justify-center bg-bg-base font-body text-xs text-text-tertiary">
+      Loading map…
+    </div>
+  ),
 });
 
 export type MapMode = "india" | "global";
@@ -110,6 +115,11 @@ export default function MapCanvas({
 }) {
   const [tilesLoadingInternal, setTilesLoadingInternal] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  // Bumped only when the error boundary asks for a reset. A stable key the
+  // rest of the time means we never rebuild the Leaflet container on
+  // ordinary re-renders — that unnecessary remount was itself a source of
+  // "Map container is already initialized" races.
+  const [mapInstanceKey, setMapInstanceKey] = useState(0);
 
   // skeleton must never stick after a failed tile event
   useEffect(() => {
@@ -123,20 +133,23 @@ export default function MapCanvas({
 
   return (
     <div className="relative h-full w-full flex-1 bg-bg-base">
-      <MapInner
-        view={view}
-        analyses={analyses}
-        selectedId={selectedId}
-        onSelect={onSelect}
-        basemap={basemap}
-        firmsHotspots={firmsHotspots}
-        showFirms={showFirms && layers.firms}
-        selectedHotspotKey={selectedHotspotKey}
-        onSelectHotspot={onSelectHotspot ?? (() => {})}
-        onTilesLoading={() => setTilesLoadingInternal(true)}
-        onTilesLoaded={() => setTilesLoadingInternal(false)}
-        onViewport={onViewport}
-      />
+      <MapErrorBoundary onReset={() => setMapInstanceKey((k) => k + 1)}>
+        <MapInner
+          key={mapInstanceKey}
+          view={view}
+          analyses={analyses}
+          selectedId={selectedId}
+          onSelect={onSelect}
+          basemap={basemap}
+          firmsHotspots={firmsHotspots}
+          showFirms={showFirms && layers.firms}
+          selectedHotspotKey={selectedHotspotKey}
+          onSelectHotspot={onSelectHotspot ?? (() => {})}
+          onTilesLoading={() => setTilesLoadingInternal(true)}
+          onTilesLoaded={() => setTilesLoadingInternal(false)}
+          onViewport={onViewport}
+        />
+      </MapErrorBoundary>
 
       {showSkeleton && (
         <div
@@ -158,12 +171,10 @@ export default function MapCanvas({
         >
           Global Live
         </div>
-      )}      {/* region mode pill — top-right */}
-      <div
-        className={clsx(
-          "absolute right-4 top-4 z-[1000] flex items-center gap-2",
-        )}
-      >
+      )}
+
+      {/* region mode pill — top-right (filters toggle alongside, §3) */}
+      <div className="absolute right-4 top-4 z-[1000] flex items-center gap-2">
         {/* filters toggle (§3) — visible in India mode where state filter applies */}
         <button
           type="button"
@@ -188,29 +199,28 @@ export default function MapCanvas({
             satellite
               ? "border-border-strong bg-bg-void/90"
               : "border-border-hairline bg-bg-raised",
-          )
-          }
-      >
-        {(
-          [
-            { id: "india", label: "India" },
-            { id: "global", label: "Global Live" },
-          ] as const
-        ).map((m) => (
-          <button
-            key={m.id}
-            type="button"
-            onClick={() => onModeChange(m.id)}
-            className={clsx(
-              "rounded-full px-4 py-1.5 font-body text-xs font-medium transition-colors duration-150",
-              mode === m.id
-                ? "border border-accent-primary bg-accent-primary/15 text-accent-primary"
-                : "border border-transparent text-text-secondary hover:text-text-primary",
-            )}
-          >
-            {m.label}
-          </button>
-        ))}
+          )}
+        >
+          {(
+            [
+              { id: "india", label: "India" },
+              { id: "global", label: "Global Live" },
+            ] as const
+          ).map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => onModeChange(m.id)}
+              className={clsx(
+                "rounded-full px-4 py-1.5 font-body text-xs font-medium transition-colors duration-150",
+                mode === m.id
+                  ? "border border-accent-primary bg-accent-primary/15 text-accent-primary"
+                  : "border border-transparent text-text-secondary hover:text-text-primary",
+              )}
+            >
+              {m.label}
+            </button>
+          ))}
         </div>
       </div>
 

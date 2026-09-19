@@ -161,6 +161,9 @@ export function useAnalyses(
       refreshInterval: ANALYSES_REFRESH_INTERVAL,
       revalidateOnFocus: true,
       keepPreviousData: true,
+      // Tab-refocus should not trigger an extra refetch on top of the poll
+      // cycle — SWR dedupes all requests within the refresh window.
+      dedupingInterval: ANALYSES_REFRESH_INTERVAL,
       ...options,
     },
   );
@@ -212,6 +215,9 @@ export function useFirms(
       refreshInterval: FIRMS_REFRESH_INTERVAL_MS,
       revalidateOnFocus: true,
       keepPreviousData: true, // never blank out during a background refresh
+      // The FIRMS payload is the app's biggest response — tab refocus must
+      // dedupe into the existing poll cadence instead of refetching it.
+      dedupingInterval: FIRMS_REFRESH_INTERVAL_MS,
       ...options,
     },
   );

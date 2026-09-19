@@ -24,6 +24,12 @@ export const db = new Database(dbPath);
 db.pragma("journal_mode = WAL"); // readers never block the ingestion writer
 db.pragma("synchronous = NORMAL");
 db.pragma("foreign_keys = ON");
+// Read-heavy workload (map viewports + dashboard polls): a large page cache
+// keeps the ~80 MB detection table's hot pages in memory instead of re-reading
+// from disk on every viewport query. Memory-mapped I/O lets SQLite serve hot
+// pages straight from the OS page cache without copy-through.
+db.pragma("cache_size = -65536"); // 64 MB (negative = KiB units)
+db.pragma("mmap_size = 268435456"); // 256 MB
 db.exec(SCHEMA_SQL);
 dbLog.info({ path: dbPath }, "sqlite ready");
 

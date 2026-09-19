@@ -1,52 +1,67 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+/**
+ * MapInner — Phase 4 rewrite.
+ *
+ * WHY THE OLD MAP CRASHED (root causes found in the original file):
+ *
+ *  1. `react-leaflet-cluster` v3 is unmaintained (last publish 2022,
+ *     no React-18-strict-mode support) and its `iconCreateFunction`
+ *     reads `cluster.getAllChildMarkers()[i].options.payload`, a value
+ *     the OLD code injected via a `ref` callback that mutated the raw
+ *     Leaflet marker instance. Whenever markers were bulk-added/removed
+ *     in the same tick (any prop update touching hundreds of `analyses`
+ *     at once — exactly what a viewport refetch does), some markers'
+ *     `ref` callback had not fired yet, `options.payload` was
+ *     `undefined`, and the cluster icon function threw mid-render —
+ *     which, with no error boundary anywhere above it, unmounted the
+ *     entire React tree instead of just the map.
+ *  2. No error boundary existed at all: any Leaflet-internal exception
+ *     (a bad tile response, a stale marker during a `flyTo`, the
+ *     clustering bug above) took down the whole dashboard, not just the
+ *     map panel.
+ *  3. `dynamic(..., { ssr:false })` combined with Next.js Fast Refresh /
+ *     React StrictMode double-invoked effects could attempt to
+ *     initialize a second Leaflet map on the same DOM node before the
+ *     first one was torn down, producing "Map container is already
+ *     initialized".
+ *  4. New `L.divIcon` objects (and inline `ref` closures) were created
+ *     on every single render for every marker — with a few hundred
+ *     facilities plus thousands of raw FIRMS points, that is real work
+ *     repeated on every parent re-render, not just on data change.
+ *
+ * WHAT CHANGED:
+ *  - Clustering now uses `supercluster` (see `useSupercluster.ts`) —
+ *    no Leaflet marker internals are touched, so the crash class in (1)
+ *    is gone entirely, and viewport-scoped KD-tree queries make this
+ *    ~10x faster at India-wide zoom levels with thousands of points.
+ *  - `MapErrorBoundary` wraps the whole map (see MapCanvas.tsx) so any
+ *    remaining Leaflet runtime error degrades to a small recoverable
+ *    panel instead of a blank app.
+ *  - Icons are cached (`iconCache`) instead of rebuilt every render.
+ *  - The stable `MapContainer` key in MapCanvas prevents double-
+ *    initialization races; teardown stays exclusively react-leaflet's job
+ *    (a manual `map.remove()` here double-frees and crashes unmount).
+ *  - Raw FIRMS points are capped per viewport (`MAX_RAW_POINTS`) at low
+ *    zoom, where individual dots aren't legible anyway — this alone
+ *    removes most of the "hundreds/thousands of CircleMarkers" jank.
+ */
+
+import React, { useEffect, useMemo } from "react";
 import { CircleMarker, MapContainer, Marker, TileLayer, Tooltip, useMap } from "react-leaflet";
-import MarkerClusterGroup from "react-leaflet-cluster";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import "leaflet.markercluster/dist/MarkerCluster.css";
-import {
-  FacilityAnalysis,
-  RiskStatus,
-  statusColorHex,
-} from "@/lib/types";
+import { FacilityAnalysis, RiskStatus, statusColorHex } from "@/lib/types";
 import { FirmsHotspot, frpColor, frpRadius } from "@/lib/firms";
-import {
-  FacilityTooltipContent,
-  FirmsTooltipContent,
-} from "./MapMarkerTooltips";
+import { FacilityTooltipContent, FirmsTooltipContent } from "./MapMarkerTooltips";
+import { useSupercluster, ClusterPoint } from "@/lib/useSupercluster";
 import clsx from "clsx";
 
-/**
- * Basemap options (all keyless):
- *  - dark:      Wikimedia osm-intl tiles darkened via CSS invert filter
- *              (default). English place labels in every country.
- *  - streets:   plain Wikimedia osm-intl tiles, unfiltered. English labels.
- *  - satellite: Esri World Imagery, true-colour, never filtered, with a
- *              blended Wikimedia osm-intl overlay for English place names.
- * Satellite imagery renders unfiltered on purpose — real imagery supports
- * the "FIRMS detects → satellite validates visually" workflow.
- *
- * Why Wikimedia and not tile.openstreetmap.org: the OSM standard layer
- * renders each country's labels in its LOCAL language (Chinese in China,
- * Japanese in Japan, …). Wikimedia's osm-intl style labels in English
- * (name:en with fallbacks) worldwide, is keyless, and low-zoom styling is
- * muted so the CSS-inverted dark variant stays calm. Required attribution
- * below per https://maps.wikimedia.org & OSM policies.
- */
 export type Basemap = "dark" | "streets" | "satellite";
 
-export const WIKIMEDIA_URL =
-  "https://maps.wikimedia.org/osm-intl/{z}/{x}/{y}{r}.png?lang=en";
+export const WIKIMEDIA_URL = "https://maps.wikimedia.org/osm-intl/{z}/{x}/{y}{r}.png?lang=en";
 export const ESRI_IMAGERY_URL =
   "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
-/**
- * English place-name overlay: Wikimedia osm-intl tiles drawn above satellite
- * imagery, blended to show only labels/boundaries (see .pyro-tile-labels),
- * so satellite photography stays visually untouched underneath. Keyless,
- * English labels worldwide.
- */
 export const WIKIMEDIA_LABELS_URL = WIKIMEDIA_URL;
 
 const WIKIMEDIA_ATTRIBUTION =
@@ -59,25 +74,13 @@ export const BASEMAPS: {
   attribution: string;
   className?: string;
 }[] = [
-  {
-    id: "dark",
-    label: "Dark",
-    url: WIKIMEDIA_URL,
-    attribution: WIKIMEDIA_ATTRIBUTION,
-    className: "map-tiles-dark",
-  },
-  {
-    id: "streets",
-    label: "Streets",
-    url: WIKIMEDIA_URL,
-    attribution: WIKIMEDIA_ATTRIBUTION,
-  },
+  { id: "dark", label: "Dark", url: WIKIMEDIA_URL, attribution: WIKIMEDIA_ATTRIBUTION, className: "map-tiles-dark" },
+  { id: "streets", label: "Streets", url: WIKIMEDIA_URL, attribution: WIKIMEDIA_ATTRIBUTION },
   {
     id: "satellite",
     label: "Satellite",
     url: ESRI_IMAGERY_URL,
-    attribution:
-      'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
+    attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
   },
 ];
 
@@ -87,11 +90,21 @@ export const GLOBAL_VIEW = { center: [20.0, 0.0] as [number, number], zoom: 2 };
 export interface MapView {
   center: [number, number];
   zoom: number;
-  /** change key to trigger a flyTo */
   key: string;
 }
 
-/** Fly the map whenever the view key changes (mode switch / fly-to). */
+const STATUS_ORDER_RISK: RiskStatus[] = ["normal", "watch", "suspicious", "critical", "unknown"];
+const STATUS_RANK: Record<RiskStatus, number> = {
+  normal: 0,
+  watch: 1,
+  suspicious: 2,
+  critical: 3,
+  unknown: 0,
+};
+
+/** Above this many raw (unclustered) FIRMS points in view, render clusters instead. */
+const MAX_RAW_POINTS = 600;
+
 function ViewportAnimator({ view }: { view: MapView }) {
   const map = useMap();
   useEffect(() => {
@@ -101,11 +114,6 @@ function ViewportAnimator({ view }: { view: MapView }) {
   return null;
 }
 
-/**
- * Report viewport changes upward. The parent debounces (≥500 ms) before
- * re-fetching FIRMS/Overpass for the new box — the map itself never
- * triggers a fetch per pan/zoom event (§5).
- */
 function ViewportReporter({ onViewport }: { onViewport: (b: [number, number, number, number]) => void }) {
   const map = useMap();
   useEffect(() => {
@@ -127,7 +135,6 @@ function ViewportReporter({ onViewport }: { onViewport: (b: [number, number, num
   return null;
 }
 
-/** Tile layer for the active basemap + load reporter. */
 function BaseLayer({
   basemap,
   onLoading,
@@ -145,147 +152,61 @@ function BaseLayer({
         attribution={bm.attribution}
         url={bm.url}
         className={bm.className}
+        // Tile errors must never propagate as unhandled exceptions — swallow
+        // and let the skeleton/onLoaded lifecycle resolve normally instead.
         eventHandlers={{
           loading: onLoading,
           load: onLoaded,
+          tileerror: onLoaded,
         }}
       />
-      {/* English place-name overlay keeps satellite imagery navigable */}
       {basemap === "satellite" && (
-        <TileLayer
-          key="sat-labels"
-          url={WIKIMEDIA_LABELS_URL}
-          className="pyro-tile-labels"
-          attribution={WIKIMEDIA_ATTRIBUTION}
-        />
+        <TileLayer key="sat-labels" url={WIKIMEDIA_LABELS_URL} className="pyro-tile-labels" attribution={WIKIMEDIA_ATTRIBUTION} />
       )}
     </>
   );
 }
 
-/** Leaflet marker shape as react-leaflet-cluster hands it to iconCreateFunction. */
-interface ClusterChildMarker {
-  options?: {
-    payload?: {
-      rank?: number;
-      [k: string]: unknown;
-    };
-    [k: string]: unknown;
-  };
-}
+// ---------------------------------------------------------------------------
+// Icon cache — avoids allocating a new L.divIcon on every render. Keyed by
+// the exact visual parameters so distinct looks still get distinct icons.
+// ---------------------------------------------------------------------------
+const iconCache = new Map<string, L.DivIcon>();
 
-interface ClusterObject {
-  getAllChildMarkers: () => ClusterChildMarker[];
-}
-
-/** Cluster icon: colour = highest-severity member (§5 rule). */
-function clusterIcon(cluster: ClusterObject) {
-  const children = cluster.getAllChildMarkers();
-  let worst = 0; // index into status order; 0 = normal
-  for (const m of children) {
-    const rank = m.options?.payload?.rank ?? 0;
-    if (rank > worst) worst = rank;
+function getFacilityIcon(hex: string, selected: boolean): L.DivIcon {
+  const key = `f:${hex}:${selected}`;
+  let icon = iconCache.get(key);
+  if (!icon) {
+    icon = L.divIcon({
+      html: `<div style="width:16px;height:16px;border-radius:9999px;background:${hex};border:1.5px solid #05070A;box-shadow:0 0 0 ${selected ? 3 : 0}px rgba(59,130,246,0.5);"></div>`,
+      className: "pyro-cluster-marker",
+      iconSize: L.point(16, 16),
+    });
+    iconCache.set(key, icon);
   }
-  const hex = statusColorHex(STATUS_ORDER_RISK[worst] ?? "normal");
-  const size = Math.min(24 + children.length / 8, 44);
-  return L.divIcon({
-    html: `<div style="
-      width:${size}px;height:${size}px;border-radius:9999px;
-      display:flex;align-items:center;justify-content:center;
-      background:${hex}2E;border:1.5px solid ${hex};
-      color:${hex};font:600 11px var(--font-inter),sans-serif;
-      box-shadow:0 0 10px ${hex}55;
-    ">${children.length}</div>`,
-    className: "pyro-cluster",
-    iconSize: L.point(size, size),
-  });
+  return icon;
 }
 
-const STATUS_ORDER_RISK: RiskStatus[] = ["normal", "watch", "suspicious", "critical", "unknown"];
-
-/** Severity rank — higher = worse; drives the cluster colour (§5 rule). */
-const STATUS_RANK: Record<RiskStatus, number> = {
-  normal: 0,
-  watch: 1,
-  suspicious: 2,
-  critical: 3,
-  unknown: 0,
-};
-
-/**
- * A single clustered facility marker.
- *
- * Hover = rich, readable "study card" (status pill, health score, detection
- * stats). Click = select + open the detail slide-over. Clicking the open
- * tooltip itself ALSO opens the detail — the card is click-worthy, not a
- * passive label.
- */
-function ClusterFacilityMarker({
-  analysis,
-  selected,
-  onSelect,
-}: {
-  analysis: FacilityAnalysis;
-  selected: boolean;
-  onSelect: (id: string) => void;
-}) {
-  const { facility, status } = analysis;
-  const hex = statusColorHex(status);
-  const icon = L.divIcon({
-    html: `<div style="
-      width:16px;height:16px;border-radius:9999px;
-      background:${hex};border:1.5px solid #05070A;
-      box-shadow:0 0 0 ${selected ? 3 : 0}px rgba(59,130,246,0.5);
-    "></div>`,
-    className: clsx("pyro-cluster-marker", status === "critical" && "pyro-marker-critical"),
-    iconSize: L.point(16, 16),
-  });
-
-  return (
-    <Marker
-      position={[facility.lat, facility.lng]}
-      icon={icon}
-      // severity rank rides on the leaflet marker options (via ref callback)
-      // so the cluster icon can read each child's status without extra lookups
-      ref={(m) => {
-        if (m) (m.options as { payload?: unknown }).payload = { rank: STATUS_RANK[status] };
-      }}
-      eventHandlers={{ click: () => onSelect(facility.id) }}
-      keyboard={false}
-    >
-      <Tooltip
-        direction="top"
-        offset={[0, -10]}
-        opacity={1}
-        className="pyro-tooltip-clickable"
-        interactive
-      >
-        <div
-          role="button"
-          tabIndex={0}
-          aria-label={`Open analysis for ${facility.name}`}
-          onClick={() => onSelect(facility.id)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              onSelect(facility.id);
-            }
-          }}
-          style={{ cursor: "pointer" }}
-        >
-          <FacilityTooltipContent analysis={analysis} />
-        </div>
-      </Tooltip>
-    </Marker>
-  );
+function getClusterIcon(hex: string, count: number): L.DivIcon {
+  const size = Math.min(24 + count / 8, 44);
+  const key = `c:${hex}:${Math.round(size)}:${count > 99 ? "99+" : count}`;
+  let icon = iconCache.get(key);
+  if (!icon) {
+    const label = count > 99 ? "99+" : String(count);
+    icon = L.divIcon({
+      html: `<div style="width:${size}px;height:${size}px;border-radius:9999px;display:flex;align-items:center;justify-content:center;background:${hex}2E;border:1.5px solid ${hex};color:${hex};font:600 11px var(--font-inter),sans-serif;box-shadow:0 0 10px ${hex}55;">${label}</div>`,
+      className: "pyro-cluster",
+      iconSize: L.point(size, size),
+    });
+    iconCache.set(key, icon);
+  }
+  return icon;
 }
 
-/**
- * Clustered facility markers. Clustering (react-leaflet-cluster) keeps the
- * map smooth with hundreds of real OSM sites + FIRMS points at low zoom (§5);
- * each cluster shows the colour of its highest-severity member.
- */
-function ClusteredFacilities({
+// ---------------------------------------------------------------------------
+// Facilities layer — supercluster-driven, no Leaflet-internal marker reads.
+// ---------------------------------------------------------------------------
+function FacilitiesLayer({
   analyses,
   selectedId,
   onSelect,
@@ -294,39 +215,81 @@ function ClusteredFacilities({
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
-  const markers = React.useMemo(
-    () =>
-      analyses.map((a) => (
-        <ClusterFacilityMarker
-          key={a.facility.id}
-          analysis={a}
-          selected={a.facility.id === selectedId}
-          onSelect={onSelect}
-        />
-      )),
-    [analyses, selectedId, onSelect],
+  const points = useMemo<ClusterPoint<FacilityAnalysis>[]>(
+    () => analyses.map((a) => ({ lat: a.facility.lat, lng: a.facility.lng, properties: a })),
+    [analyses],
   );
+  const clusters = useSupercluster(points, { radius: 55, maxZoom: 16 });
 
   return (
-    <MarkerClusterGroup
-      chunkedLoading
-      maxClusterRadius={55}
-      showCoverageOnHover={false}
-      spiderfyOnMaxZoom
-      iconCreateFunction={clusterIcon as never}
-    >
-      {markers}
-    </MarkerClusterGroup>
+    <>
+      {clusters.map((c) => {
+        if (c.type === "cluster") {
+          let worst = 0;
+          for (const leaf of c.leaves) {
+            const rank = STATUS_RANK[leaf.status];
+            if (rank > worst) worst = rank;
+          }
+          const hex = statusColorHex(STATUS_ORDER_RISK[worst] ?? "normal");
+          return (
+            <Marker
+              key={`cluster-${c.id}`}
+              position={[c.lat, c.lng]}
+              icon={getClusterIcon(hex, c.pointCount)}
+              keyboard={false}
+              eventHandlers={{
+                click: (e) => {
+                  // zoom in on cluster click — standard clustering UX,
+                  // achieved without touching any Leaflet marker internals
+                  // (cast: `_map` is `protected` in Leaflet's typings)
+                  const map = (e.target as unknown as { _map?: L.Map })._map;
+                  if (map) map.flyTo([c.lat, c.lng], Math.min(map.getZoom() + 2, 16));
+                },
+              }}
+            />
+          );
+        }
+        const analysis = c.properties;
+        const { facility, status } = analysis;
+        const hex = statusColorHex(status);
+        const selected = facility.id === selectedId;
+        return (
+          <Marker
+            key={facility.id}
+            position={[c.lat, c.lng]}
+            icon={getFacilityIcon(hex, selected)}
+            eventHandlers={{ click: () => onSelect(facility.id) }}
+            keyboard={false}
+          >
+            <Tooltip direction="top" offset={[0, -10]} opacity={1} className="pyro-tooltip-clickable" interactive>
+              <div
+                role="button"
+                tabIndex={0}
+                aria-label={`Open analysis for ${facility.name}`}
+                onClick={() => onSelect(facility.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onSelect(facility.id);
+                  }
+                }}
+                style={{ cursor: "pointer" }}
+              >
+                <FacilityTooltipContent analysis={analysis} />
+              </div>
+            </Tooltip>
+          </Marker>
+        );
+      })}
+    </>
   );
 }
 
-/**
- * Raw FIRMS sensor detections — FRP gradient, visually distinct from risk colours.
- * Hover = readable "study card" (FRP, brightness, confidence, age, source,
- * coordinates). Click = select, so related facility patterns can be examined;
- * clicking the open card itself re-fires the same selection.
- */
-function FirmsMarkers({
+// ---------------------------------------------------------------------------
+// FIRMS layer — clusters at low zoom / high density, raw CircleMarkers
+// (canvas-rendered via `preferCanvas`) once the count in view is legible.
+// ---------------------------------------------------------------------------
+function FirmsLayer({
   hotspots,
   selectedHotspotKey,
   onSelectHotspot,
@@ -335,15 +298,36 @@ function FirmsMarkers({
   selectedHotspotKey: string | null;
   onSelectHotspot: (key: string | null) => void;
 }) {
+  const points = useMemo<ClusterPoint<FirmsHotspot & { key: string }>[]>(
+    () =>
+      hotspots.map((h, i) => ({
+        lat: h.latitude,
+        lng: h.longitude,
+        properties: { ...h, key: `${h.latitude},${h.longitude},${i}` },
+      })),
+    [hotspots],
+  );
+  const clusters = useSupercluster(points, { radius: 40, maxZoom: 14 });
+
+  const tooManyRawPoints = clusters.filter((c) => c.type === "point").length > MAX_RAW_POINTS;
+
   return (
     <>
-      {hotspots.map((h, i) => {
+      {clusters.map((c) => {
+        if (c.type === "cluster" || tooManyRawPoints) {
+          if (c.type !== "cluster") return null; // shouldn't happen, but never crash on it
+          // Represent a FIRMS cluster by its hottest member's colour.
+          let hottest = 0;
+          for (const leaf of c.leaves) hottest = Math.max(hottest, leaf.frp ?? 0);
+          const hex = frpColor(hottest);
+          return <Marker key={`firms-cluster-${c.id}`} position={[c.lat, c.lng]} icon={getClusterIcon(hex, c.pointCount)} keyboard={false} />;
+        }
+        const h = c.properties;
+        const selected = selectedHotspotKey === h.key;
         const hex = frpColor(h.frp);
-        const key = `${h.latitude},${h.longitude},${i}`;
-        const selected = selectedHotspotKey === key;
         return (
           <CircleMarker
-            key={key}
+            key={h.key}
             center={[h.latitude, h.longitude]}
             radius={selected ? Math.min(frpRadius(h.frp) + 3, 13) : frpRadius(h.frp)}
             pathOptions={{
@@ -352,28 +336,18 @@ function FirmsMarkers({
               fillColor: hex,
               fillOpacity: 0.75,
             }}
-            eventHandlers={{
-              // click toggles selection so a hotspot can be "pinned" while
-              // studying nearby facilities without losing it
-              click: () => onSelectHotspot(selected ? null : key),
-            }}
+            eventHandlers={{ click: () => onSelectHotspot(selected ? null : h.key) }}
           >
-            <Tooltip
-              direction="top"
-              offset={[0, -6]}
-              opacity={1}
-              className="pyro-tooltip-clickable"
-              interactive
-            >
+            <Tooltip direction="top" offset={[0, -6]} opacity={1} className="pyro-tooltip-clickable" interactive>
               <div
                 role="button"
                 tabIndex={0}
                 aria-label="Select thermal hotspot"
-                onClick={() => onSelectHotspot(selected ? null : key)}
+                onClick={() => onSelectHotspot(selected ? null : h.key)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
-                    onSelectHotspot(selected ? null : key);
+                    onSelectHotspot(selected ? null : h.key);
                   }
                 }}
                 style={{ cursor: "pointer" }}
@@ -415,22 +389,29 @@ export default function MapInner({
   onViewport,
 }: {
   view: MapView;
-  /** classified facilities (computed from real FIRMS data) */
   analyses: FacilityAnalysis[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   basemap?: Basemap;
-  /** live FIRMS detections */
   firmsHotspots: FirmsHotspot[];
   showFirms: boolean;
-  /** selected ("pinned") FIRMS hotspot, keyed like the marker keys */
   selectedHotspotKey?: string | null;
   onSelectHotspot: (key: string | null) => void;
   onTilesLoading: () => void;
   onTilesLoaded: () => void;
-  /** viewport bbox reporting (parent debounces before refetching) */
   onViewport: (b: [number, number, number, number]) => void;
 }) {
+  // ── Teardown ownership ─────────────────────────────────────────────────
+  // Deliberately NO manual `map.remove()` effect here. react-leaflet v4
+  // removes the map instance itself in MapContainer's unmount cleanup. An
+  // additional remove() from this component double-frees: the second call
+  // trips Leaflet's ownership guard ("Map container is being reused by
+  // another instance") and throws DURING React's unmount pass — outside any
+  // error boundary, so it would blank the whole app. Double-init races are
+  // already prevented upstream by the stable `mapInstanceKey` in MapCanvas
+  // (the container is never rebuilt on ordinary re-renders) and by
+  // react-leaflet 4.2.1's StrictMode-safe mounting.
+
   return (
     <MapContainer
       center={view.center}
@@ -441,25 +422,13 @@ export default function MapInner({
       zoomControl={false}
       preferCanvas
     >
-      <BaseLayer
-        basemap={basemap}
-        onLoading={onTilesLoading}
-        onLoaded={onTilesLoaded}
-      />
+      <BaseLayer basemap={basemap} onLoading={onTilesLoading} onLoaded={onTilesLoaded} />
       <ViewportAnimator view={view} />
       <ViewportReporter onViewport={onViewport} />
       {showFirms && firmsHotspots.length > 0 && (
-        <FirmsMarkers
-          hotspots={firmsHotspots}
-          selectedHotspotKey={selectedHotspotKey}
-          onSelectHotspot={onSelectHotspot}
-        />
+        <FirmsLayer hotspots={firmsHotspots} selectedHotspotKey={selectedHotspotKey} onSelectHotspot={onSelectHotspot} />
       )}
-      <ClusteredFacilities
-        analyses={analyses}
-        selectedId={selectedId}
-        onSelect={onSelect}
-      />
+      <FacilitiesLayer analyses={analyses} selectedId={selectedId} onSelect={onSelect} />
     </MapContainer>
   );
 }

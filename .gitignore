@@ -38,6 +38,11 @@ backend/build/
 # Testing
 coverage/
 
+# Python bytecode / caches (previously leaked into git — 36 tracked .pyc files)
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
 # Logs
 npm-debug.log*
 yarn-debug.log*
