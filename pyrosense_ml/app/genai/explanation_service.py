@@ -8,9 +8,8 @@ Philosophy (mirrors backend/src/services/genaiService.ts):
   Nemotron reasoning models, <think> blocks stripped.
 - Provider chain: primary → fallback models → deterministic template.
 - Explanations are cached in PostgreSQL by hash(features + risk + class);
-  identical inputs never pay for a second LLM call.
-- Special case: Other_Persistent_Thermal_Source is always described as a
-  residual/unconfirmed category, matching the model's semantics.
+  identical inputs never pay for a second LLM call.- The classifier's output is a CONTEXTUAL label derived from evidence, never
+    presented as proof of ignition cause.
 """
 
 from __future__ import annotations
@@ -31,17 +30,24 @@ logger = logging.getLogger("pyrosense.genai")
 
 SYSTEM_PROMPT = (
     "You are PYROSENSE, a thermal-anomaly analyst. You classify persistent "
-    "satellite hotspots (VIIRS) into: Agricultural Vegetation, Industrial, "
-    "Mining Extraction, or Other Persistent Thermal Source. You write short, "
-    "grounded explanations for analysts. You use ONLY the numbers provided in "
-    "the prompt — never invent, round, or extrapolate any value. If a number "
-    "is not in the facts, you do not mention it. Maximum 120 words. No markdown."
+    "satellite hotspots (VIIRS) into: Agricultural, Forest Vegetation, "
+    "Industrial, Infrastructure Energy, or Mining. You write short, grounded "
+    "explanations for analysts. You use ONLY the numbers provided in the "
+    "prompt — never invent, round, or extrapolate any value. If a number is "
+    "not in the facts, you do not mention it. Maximum 120 words. No markdown."
 )
 
 _RISK_BUCKETS = [(25.0, "low"), (50.0, "moderate"), (75.0, "elevated"), (101.0, "high")]
 
 
 def risk_bucket(risk_score: float) -> str:
+    """Severity bucket for the legacy 0-100 scalar risk_score column.
+
+    Phase 2A: scalar risk scores are only a compatibility shim now that the
+    GRU risk models exist; the pipeline passes risk_score=None until the
+    Phase 2C H3 pipeline produces real signals. Prefer the returned class +
+    confidence in any UI.
+    """
     for ceiling, name in _RISK_BUCKETS:
         if risk_score < ceiling:
             return name
@@ -52,7 +58,7 @@ def build_facts(
     *,
     predicted_class: str,
     probabilities: dict[str, float],
-    risk_score: float,
+    risk_score: float | None,
     confidence: float,
     top_features: list[dict],
     features: dict,
@@ -62,7 +68,10 @@ def build_facts(
     lines = [
         f"Predicted class: {predicted_class}",
         f"Confidence: {round(confidence * 100)}% (maximum class probability)",
-        f"Risk score: {risk_score} / 100 ({risk_bucket(risk_score)} severity)",
+    ]
+    if risk_score is not None:
+        lines.append(f"Risk score: {risk_score} / 100 ({risk_bucket(risk_score)} severity)")
+    lines += [
         f"Data source: {source}",
         "Class probabilities: "
         + ", ".join(f"{k.replace('_', ' ')} {round(v * 100)}%" for k, v in probabilities.items()),
@@ -75,29 +84,22 @@ def build_facts(
                 value = round(value, 4)
             parts.append(f"{f.get('feature')}={value}")
         lines.append("Top contributing features: " + "; ".join(parts))
-    lc = features.get("dominant_land_cover")
-    if isinstance(lc, str):
-        lines.append(f"Dominant land cover: {lc.replace('_', ' ')}")
     return lines
 
 
 def _user_prompt(facts: list[str]) -> str:
     residual = (
-        "Note: Other_Persistent_Thermal_Source is a RESIDUAL / UNCONFIRMED "
-        "category — thermal activity that persists but matches none of the "
-        "named classes. If it is the prediction, say so explicitly and avoid "
-        "over-claiming a specific facility type.\n"
-        if any(f.startswith("Predicted class: Other_Persistent") for f in facts)
-        else ""
+        "Note: this classifier output is a CONTEXTUAL label derived from "
+        "spatial/environmental evidence — it is NOT proof of the actual "
+        "ignition cause. Say so when confidence is low.\n"
     )
     return (
         "Facts (use ONLY these numbers):\n"
-        + "\n".join(f"- {f}" for f in facts)
-        + "\n\n"
-        + residual
-        + "Write one grounded paragraph explaining WHY this hotspot received "
-        "this classification and risk score, referencing the contributing "
-        "features with their exact values."
+        + "\n".join(f"- {f}" for f in facts)    + "\n\n"
+    + residual
+    + "Write one grounded paragraph explaining WHY this hotspot received "
+    "this classification, referencing the class probabilities with their "
+    "exact values."
     )
 
 
@@ -147,7 +149,7 @@ async def get_explanation(
     session: AsyncSession,
     *,
     features: dict,
-    risk_score: float,
+    risk_score: float | None,
     predicted_class: str,
     probabilities: dict[str, float],
     confidence: float,
@@ -273,7 +275,7 @@ async def _generate(facts: list[str]) -> tuple[str, str, bool]:
 def template_explanation(
     *,
     predicted_class: str,
-    risk_score: float,
+    risk_score: float | None,
     confidence: float,
     top_features: list[dict],
     source: str,
@@ -282,17 +284,14 @@ def template_explanation(
     drivers = ", ".join(
         f.get("feature", "?") for f in top_features[:3]
     ) or "the engineered features"
-    if predicted_class == "Other_Persistent_Thermal_Source":
-        qualifier = (
-            "This is a residual, unconfirmed category — the thermal signature "
-            "persists but does not match the named classes."
-        )
-    else:
-        qualifier = ""
+    risk_part = (
+        f"yielding a risk score of {risk_score}/100 ({risk_bucket(risk_score)} severity)"
+        if risk_score is not None
+        else "with GRU risk signals pending the live H3 pipeline"
+    )
     return (
         f"This hotspot is classified as {predicted_class.replace('_', ' ')} "
-        f"with {round(confidence * 100)}% confidence, yielding a risk score of "
-        f"{risk_score}/100 ({risk_bucket(risk_score)} severity) from {source} "
-        f"data. The strongest contributing factors were {drivers}. {qualifier}"
+        f"with {round(confidence * 100)}% confidence, {risk_part} from {source} "
+        f"data. The strongest contributing factors were {drivers}. "
         "Explanation generated from the deterministic template (LLM unavailable)."
     ).strip()

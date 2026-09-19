@@ -1,14 +1,20 @@
 """POST /predict — classify a new/live hotspot end-to-end.
 
-Pipeline: schema guard → inference → risk score → key drivers → persistence
-(hotspot + prediction + daily snapshot) → GenAI explanation → response.
+Phase 2A pipeline: schema guard → MLP classifier → class + confidence →
+persistence (hotspot + prediction + daily snapshot) → GenAI explanation →
+response.
 
 Two modes:
-- Full auto mode (default): only latitude/longitude required; the 36 features
-  are engineered from SQLite detection history + OSM + land cover + weather,
-  with median fallbacks.
-- Expert mode: a full 36-feature payload bypasses engineering (still passes
+- Full auto mode (default): only latitude/longitude required; the 43 classifier
+  features are engineered from SQLite detection history + OSM + land cover +
+  weather, with documented fallbacks.
+- Expert mode: a full 43-feature payload bypasses engineering (still passes
   the schema guard).
+
+RISK PREDICTION PATH (Phase 2A): the GRU risk models need a 30-day × 17-feature
+H3-cell sequence that this endpoint cannot build yet — that is Phase 2C's live
+feature pipeline. Until then the risk path returns HTTP 501 with a clear
+error; it is never faked or silently skipped.
 """
 
 from __future__ import annotations
@@ -26,20 +32,24 @@ from app.data.live import (
     save_prediction,
 )
 from app.feature_schema import (
+    CLASSIFIER_FEATURES,
+    CLASSIFIER_MODEL_VERSION,
     DATASET_VERSION,
-    FEATURE_NAMES,
-    MODEL_VERSION,
     SCHEMA_VERSION,
     SchemaViolation,
 )
 from app.features.engineer import engineer_features
 from app.ml.inference import predict as run_inference
-from app.ml.risk_score import compute_risk_score, key_contributors
+from app.ml.risk_score import score_risk  # ready for Phase 2C; unused until then
 from app.genai.explanation_service import get_explanation
 
 logger = logging.getLogger("pyrosense.api.predict")
 
 router = APIRouter()
+
+RISK_NOT_IMPLEMENTED_DETAIL = (
+    "risk prediction requires the live H3 feature pipeline, not yet built (Phase 2C)"
+)
 
 
 class PredictRequest(BaseModel):
@@ -47,6 +57,8 @@ class PredictRequest(BaseModel):
     longitude: float = Field(ge=-180, le=180)
     region: str | None = None
     features: dict[str, float | str] | None = None
+    # Phase 2A: risk is not computable yet (no live H3 sequence pipeline).
+    include_risk: bool = False
 
     @field_validator("features")
     @classmethod
@@ -67,6 +79,12 @@ async def predict_endpoint(
     body: PredictRequest,
     session: AsyncSession = Depends(get_db),
 ):
+    # ── 0. Risk path: cannot run until the Phase 2C H3 pipeline exists ──────
+    # Never fake a sequence, never return a made-up risk score, never silently
+    # skip the risk fields — refuse loudly instead.
+    if body.include_risk:
+        raise HTTPException(status_code=501, detail={"error": RISK_NOT_IMPLEMENTED_DETAIL})
+
     # ── 1. Features: engineer or accept expert payload ──────────────────────
     warnings: list[str] = []
     provenance: dict[str, str] = {}
@@ -79,19 +97,16 @@ async def predict_endpoint(
         features = dict(body.features)
         provenance = {"features": "client_provided"}
 
-    # ── 2. Schema guard → inference → risk → drivers ────────────────────────
+    # ── 2. Schema guard → classifier ─────────────────────────────────────────
     try:
         result = run_inference(features)
-        if body.features is not None and len(features) != len(FEATURE_NAMES):
+        if body.features is not None and len(features) != len(CLASSIFIER_FEATURES):
             raise SchemaViolation(
-                f"expert payload must contain all {len(FEATURE_NAMES)} features "
+                f"expert payload must contain all {len(CLASSIFIER_FEATURES)} features "
                 f"(got {len(features)})"
             )
     except SchemaViolation as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    risk_score = compute_risk_score(result.probabilities)
-    drivers = key_contributors(result.features, top_k=5)
 
     # ── 3. Persist hotspot + prediction + daily snapshot ────────────────────
     created = await get_or_create_live_hotspot(
@@ -101,8 +116,8 @@ async def predict_endpoint(
         session,
         hotspot=created.hotspot,
         result=result,
-        risk_score=risk_score,
-        top_contributing_features=drivers,
+        risk_score=0.0,  # legacy scalar column; GRU risk signals need Phase 2C
+        top_contributing_features=[],  # per-feature importances not exposed by the MLP
         source="live",
     )
     await record_timeline_snapshot(session, hotspot=created.hotspot, prediction=pred)
@@ -112,11 +127,11 @@ async def predict_endpoint(
     explanation, explanation_provenance = await get_explanation(
         session,
         features=result.features,
-        risk_score=risk_score,
+        risk_score=None,
         predicted_class=result.predicted_class,
         probabilities=result.probabilities,
         confidence=result.confidence,
-        top_features=drivers,
+        top_features=[],
         source="live",
         prediction_id=pred.id,
     )
@@ -126,13 +141,13 @@ async def predict_endpoint(
         "hotspot_id": created.hotspot.hotspot_uid,
         "class": result.predicted_class,
         "probabilities": result.probabilities,
-        "risk_score": risk_score,
         "confidence": result.confidence,
-        "top_contributing_features": drivers,
+        "risk": None,
+        "risk_unavailable": RISK_NOT_IMPLEMENTED_DETAIL,
         "explanation": explanation,
         "explanation_provenance": explanation_provenance,
         "source": "live",
-        "model_version": MODEL_VERSION,
+        "model_version": CLASSIFIER_MODEL_VERSION,
         "dataset_version": DATASET_VERSION,
         "feature_schema_version": SCHEMA_VERSION,
         "prediction_timestamp": result.prediction_timestamp.isoformat(),

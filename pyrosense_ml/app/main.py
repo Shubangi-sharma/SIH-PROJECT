@@ -17,7 +17,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
 from app.config import settings
-from app.feature_schema import FEATURE_NAMES, MODEL_VERSION, SCHEMA_VERSION
+from app.feature_schema import (
+    CLASSIFIER_CLASSES,
+    CLASSIFIER_FEATURES,
+    CLASSIFIER_MODEL_VERSION,
+    SCHEMA_VERSION,
+)
 
 
 def _setup_logging() -> None:
@@ -54,16 +59,19 @@ async def lifespan(app: FastAPI):
     _setup_logging()
     logger = logging.getLogger("pyrosense.startup")
 
-    # 1. Model — load + validate against frozen schema.
+    # 1. Models — load + validate classifier + GRU risk models against the
+    # frozen schema (hard-fails on any mismatch).
     from app.ml.model_loader import load_model
 
     loaded = load_model()
     logger.info(
-        "model ready: version=%s schema=%s features=%d classes=%s",
-        loaded.model_version,
-        loaded.feature_schema_version,
-        len(loaded.feature_names),
-        loaded.classes,
+        "models ready: classifier_version=%s schema=%s classifier_features=%d "
+        "classes=%s risk_horizons=%s",
+        CLASSIFIER_MODEL_VERSION,
+        SCHEMA_VERSION,
+        len(CLASSIFIER_FEATURES),
+        list(CLASSIFIER_CLASSES),
+        sorted(loaded.risk_models),
     )
 
     # 2. PostgreSQL — connectivity + schema + seed.
@@ -120,7 +128,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="PyroSense ML Service",
-        version=MODEL_VERSION,
+        version=CLASSIFIER_MODEL_VERSION,
         description="ML inference, risk scoring, timelines, and GenAI explanations",
         lifespan=lifespan,
     )

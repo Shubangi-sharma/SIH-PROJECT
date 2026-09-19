@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.health import get_db
 from app.data.historical import HotspotSummary, get_hotspot_with_latest, list_hotspots
 from app.data.timeline import get_timeline
-from app.feature_schema import FEATURE_NAMES
+from app.feature_schema import CLASSIFIER_FEATURES
 
 router = APIRouter(prefix="/hotspots")
 
@@ -98,5 +98,5 @@ async def hotspot_detail(hotspot_uid: str, session: AsyncSession = Depends(get_d
         ),
         "feature_snapshot": features,
         "feature_count": len(features or {}),
-        "expected_features": list(FEATURE_NAMES),
+        "expected_features": list(CLASSIFIER_FEATURES),
     }

@@ -1,20 +1,23 @@
-"""Historical seeding — populate the 552 frozen hotspots + initial predictions.
+"""Historical seeding — populate frozen hotspots + initial predictions.
 
 Sources (first available wins):
-1. `PYROSENSE_HISTORICAL_CSV` — the original enriched training CSV with the 36
+1. `PYROSENSE_HISTORICAL_CSV` — an enriched CSV carrying the classifier's 43
    feature columns + latitude/longitude (+ optional label). This is the
    PREFERRED source: frozen, exact, reproducible.
 2. SQLite clustering fallback — derive hotspots from the Node backend's
-   detections. Clearly marked `dataset_version=0.0.0-sqlite-fallback` so
-   downstream consumers can tell these apart from the frozen dataset.
+   detections. Fire/FRP/brightness features are computed from real detections;
+   OSM/land-cover/weather context is not available in the 3-day NRT window, so
+   those blocks use their documented 0.0 priors. Rows are marked
+   `dataset_version=0.0.0-sqlite-fallback` so downstream consumers can tell
+   these apart from a frozen dataset.
 
-Every seeded hotspot gets an initial prediction computed by THIS service's
-model pipeline, so /hotspots is immediately useful.
+Every seeded hotspot gets an initial prediction from THIS service's classifier.
+NOTE (Phase 2A): inference requires all 43 classifier features; rows missing
+too many of them are skipped with a warning.
 """
 
 from __future__ import annotations
 
-import csv
 import logging
 import os
 from pathlib import Path
@@ -27,16 +30,12 @@ from app.config import settings
 from app.data.live import SOURCE_LIVE, save_prediction
 from app.db.models import Hotspot
 from app.feature_schema import (
+    CLASSIFIER_FEATURES,
+    CLASSIFIER_TRAINING_MEDIANS,
     DATASET_VERSION,
-    FEATURE_NAMES,
-    LEAKAGE_COLUMNS,
-    MODEL_CLASSES,
-    SCHEMA_VERSION,
-    TRAINING_MEDIANS,
-    validate_features,
+    validate_classifier_features,
 )
 from app.ml.inference import predict as run_inference
-from app.ml.risk_score import compute_risk_score, key_contributors
 
 logger = logging.getLogger("pyrosense.seed")
 
@@ -54,24 +53,21 @@ def _extract_coords(row: dict) -> tuple[float, float] | None:
         return None
 
 
-def _coerce_features(row: dict) -> dict[str, object]:
-    feats: dict[str, object] = {}
-    for name in FEATURE_NAMES:
+def _coerce_features(row: dict) -> dict[str, float]:
+    feats: dict[str, float] = {}
+    for name in CLASSIFIER_FEATURES:
         v = row.get(name)
         if v in (None, ""):
             continue
-        if name == "dominant_land_cover":
-            feats[name] = str(v).strip().lower().replace(" ", "_")
-        else:
-            try:
-                feats[name] = float(v)
-            except (TypeError, ValueError):
-                continue
+        try:
+            feats[name] = float(v)
+        except (TypeError, ValueError):
+            continue
     return feats
 
 
 def load_historical_csv(path: Path) -> list[dict]:
-    """Parse the enriched CSV into seed rows (features + coords + optional label)."""
+    """Parse an enriched CSV into seed rows (43 features + coords + label)."""
     df = pd.read_csv(path)
     df.columns = [c.strip() for c in df.columns]
     rows: list[dict] = []
@@ -82,16 +78,15 @@ def load_historical_csv(path: Path) -> list[dict]:
             logger.warning("row %d: missing latitude/longitude — skipped", i)
             continue
         feats = _coerce_features(row)
-        valid = validate_features(feats, strict=False)
-        if len(valid) < len(FEATURE_NAMES) // 2:
-            logger.warning("row %d: <50%% of features present — skipped", i)
+        if len(feats) < len(CLASSIFIER_FEATURES) // 2:
+            logger.warning("row %d: <50%% of classifier features present — skipped", i)
             continue
         label = row.get("label") or row.get("class") or row.get("target")
         rows.append(
             {
                 "latitude": coords[0],
                 "longitude": coords[1],
-                "features": valid,
+                "features": feats,
                 "label": str(label).strip() if label else None,
                 "hotspot_uid": str(row.get("hotspot_id") or f"hist-{i + 1:04d}"),
             }
@@ -102,12 +97,12 @@ def load_historical_csv(path: Path) -> list[dict]:
 def derive_from_sqlite(min_detections: int = 5, limit: int = 552) -> list[dict]:
     """Fallback: grid-cluster the Node backend's detections into hotspots.
 
-    These are NOT the frozen 552 — they are what the current 3-day NRT window
-    supports, marked with a distinct dataset_version.
+    These are NOT a frozen dataset — they are what the current 3-day NRT
+    window supports, marked with a distinct dataset_version.
     """
-    from app.data.live import detection_history_query_sqlite  # noqa: F401
-    from app.db.engine import sqlite_connect_readonly
     from collections import defaultdict
+
+    from app.db.engine import sqlite_connect_readonly
 
     con = sqlite_connect_readonly()
     try:
@@ -129,21 +124,18 @@ def derive_from_sqlite(min_detections: int = 5, limit: int = 552) -> list[dict]:
         dates = sorted(d["acq_date"] for d in dets)
         frps = [d["frp"] or 0.0 for d in dets]
         derived = {
-            "total_detections": float(len(dets)),
-            "unique_days": float(len(set(dates))),
-            "unique_months": float(len({(d[:4], d[5:7]) for d in dates})),
-            "active_duration_days": 0.0,
-            "mean_FRP": sum(frps) / len(frps),
-            "max_FRP": max(frps),
-            "first_detection_year": float(dates[0][:4]),
-            "first_detection_month": float(dates[0][5:7]),
-            "last_detection_year": float(dates[-1][:4]),
-            "last_detection_month": float(dates[-1][5:7]),
+            "unique_h3_cells": 1.0,
+            "total_fire_detections": float(len(dets)),
+            "unique_fire_days": float(len(set(dates))),
+            "temporal_span_days": 0.0,
+            "active_months": float(len({(d[:4], d[5:7]) for d in dates})),
+            "mean_frp": sum(frps) / len(frps),
+            "max_frp": max(frps),
         }
         # The 3-day NRT window cannot supply OSM/land-cover/weather context.
-        # Fill those from training medians (documented synthetic fallback —
-        # rows carry dataset_version=0.0.0-sqlite-fallback for traceability).
-        feats = {"dominant_land_cover": "bare", **TRAINING_MEDIANS, **derived}
+        # Fill those from the documented priors (rows carry
+        # dataset_version=0.0.0-sqlite-fallback for traceability).
+        feats = {**CLASSIFIER_TRAINING_MEDIANS, **derived}
         out.append(
             {
                 "latitude": lat,
@@ -187,12 +179,11 @@ async def _seed_rows(session: AsyncSession, rows: list[dict], dataset_version: s
     for row in rows:
         feats = row["features"]
         try:
+            validate_classifier_features(feats)
             result = run_inference(feats)
         except Exception as exc:
             logger.warning("hotspot %s: inference failed (%s) — skipped", row["hotspot_uid"], exc)
             continue
-        risk = compute_risk_score(result.probabilities)
-        drivers = key_contributors(result.features, top_k=5)
 
         hotspot = Hotspot(
             hotspot_uid=row["hotspot_uid"],
@@ -208,8 +199,8 @@ async def _seed_rows(session: AsyncSession, rows: list[dict], dataset_version: s
             session,
             hotspot=hotspot,
             result=result,
-            risk_score=risk,
-            top_contributing_features=drivers,
+            risk_score=0.0,  # legacy scalar column; GRU risk needs Phase 2C
+            top_contributing_features=[],  # per-feature importances not exposed by the MLP
             source="historical",
             dataset_version=dataset_version,
         )

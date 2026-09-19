@@ -1,9 +1,14 @@
 """Weather features — historical aggregates from the Open-Meteo ERA5 archive.
 
 Fetches daily aggregates for a point over a lookback window and derives the
-eight model weather features. Responses are cached in-process (TTL from
-settings); failures return None-features so the engineer can apply median
-fallback and flag provenance.
+temperature/wind/dewpoint/precipitation features the models need (engineer.py
+remaps these onto the classifier's *_c/_ms names). Responses are cached
+in-process (TTL from settings); failures return None-features so the engineer
+can apply fallback and flag provenance.
+
+NOTE (Phase 2A): relative humidity and solar radiation (ssrd) are classifier
+features with no source here — see features/engineer.py for the documented
+fallback.
 """
 
 from __future__ import annotations

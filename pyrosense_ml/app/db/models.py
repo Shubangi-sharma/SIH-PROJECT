@@ -34,9 +34,9 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.feature_schema import (
+    CLASSIFIER_FEATURES,
+    CLASSIFIER_MODEL_VERSION,
     DATASET_VERSION,
-    FEATURE_NAMES,
-    MODEL_VERSION,
     SCHEMA_VERSION,
 )
 
@@ -100,7 +100,7 @@ class Prediction(Base):
 
     top_contributing_features: Mapped[list] = mapped_column(JSONVariant, nullable=False, default=list)
 
-    model_version: Mapped[str] = mapped_column(String(32), nullable=False, default=MODEL_VERSION)
+    model_version: Mapped[str] = mapped_column(String(32), nullable=False, default=CLASSIFIER_MODEL_VERSION)
     dataset_version: Mapped[str] = mapped_column(String(32), nullable=False, default=DATASET_VERSION)
     feature_schema_version: Mapped[str] = mapped_column(String(32), nullable=False, default=SCHEMA_VERSION)
 
@@ -203,5 +203,7 @@ class LiveDetection(Base):
     )
 
 
-# Reference: the 36 frozen features this store's snapshots carry.
-FEATURE_NAMES_REF = list(FEATURE_NAMES)
+# Reference: the 43 frozen classifier features this store's snapshots carry.
+# (Phase 2A: the old 36-feature GBM schema was replaced by the 43-feature
+# classifier; risk-model sequences are a separate schema — see feature_schema.)
+FEATURE_NAMES_REF = list(CLASSIFIER_FEATURES)
