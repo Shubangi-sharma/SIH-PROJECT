@@ -76,3 +76,7 @@ next-env.d.ts
 .uv-pythons/
 .venv-model/
 .gstack/
+
+# Phase 1: keep raw datasets out of data_science/
+data_science/**/*.npy
+data_science/**/raw_data/
