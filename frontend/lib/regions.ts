@@ -6,8 +6,6 @@
  * [1..5]."), so app/api/firms/route.ts accumulates a rolling server-side
  * cache to serve this full window of real data.
  */
-export const FIRMS_WINDOW_DAYS = 10;
-
 export interface BBox {
   west: number;
   south: number;

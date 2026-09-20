@@ -11,7 +11,6 @@
 import { useCallback, useEffect, useState } from "react";
 
 const KEY = "pyrosense.compareIds";
-export const COMPARE_MIN = 2;
 export const COMPARE_MAX = 3;
 
 /** Safely read persisted ids (client only). */

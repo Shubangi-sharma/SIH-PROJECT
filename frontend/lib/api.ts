@@ -123,12 +123,6 @@ export interface SummaryResponseDto {
   factsHash?: string;
 }
 
-export interface CoverageDto {
-  minDate: string | null;
-  maxDate: string | null;
-  rows: number;
-}
-
 /* ------------------------------------------------------------------ */
 /* fetchers                                                            */
 /* ------------------------------------------------------------------ */
@@ -149,11 +143,6 @@ async function fetchText(path: string): Promise<string> {
 /* endpoints                                                           */
 /* ------------------------------------------------------------------ */
 
-/** GET /api/facilities?bbox=… — OSM facility catalogue (ingested, not live). */
-export function fetchFacilities(bbox: string): Promise<{ facilities: FacilityDto[]; count: number }> {
-  return fetchJson(`/api/facilities?bbox=${encodeURIComponent(bbox)}`);
-}
-
 /** GET /api/analyses?bbox=… — classified facilities for a region window. */
 export function fetchAnalyses(bbox: string): Promise<{ analyses: FacilityAnalysisDto[]; count: number }> {
   return fetchJson(`/api/analyses?bbox=${encodeURIComponent(bbox)}`);
@@ -172,16 +161,6 @@ export function fetchFacilityAnalysis(id: string): Promise<FacilityAnalysisRespo
 /** GET /api/facilities/:id/summary — grounded AI summary (with fallback chain). */
 export function fetchSummary(id: string): Promise<SummaryResponseDto> {
   return fetchJson(`/api/facilities/${encodeURIComponent(id)}/summary`);
-}
-
-/** GET /api/firms/coverage — what history the backend actually holds. */
-export function fetchCoverage(): Promise<CoverageDto> {
-  return fetchJson(`/api/firms/coverage`);
-}
-
-/** GET /health — uptime probe. */
-export function fetchHealth(): Promise<{ status: string; db: CoverageDto }> {
-  return fetchJson(`/health`);
 }
 
 /* ------------------------------------------------------------------ */

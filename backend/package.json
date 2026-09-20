@@ -23,6 +23,7 @@
     "dotenv": "^16.6.1",
     "express": "^4.21.0",
     "express-rate-limit": "^7.4.0",
+    "h3-js": "^4.5.0",
     "lru-cache": "^11.0.1",
     "node-cron": "^3.0.3",
     "p-limit": "^6.1.0",

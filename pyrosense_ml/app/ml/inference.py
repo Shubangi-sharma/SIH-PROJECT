@@ -1,10 +1,15 @@
-"""Inference — the ONLY path through the model.
+"""Inference — the ONLY path through the classifier.
 
-Contract:
-- Accepts a validated 36-feature mapping.
-- Builds a single-row DataFrame with the exact frozen column order.
-- Calls predict() + predict_proba().
-- Returns a PredictionResult dataclass; never the raw pipeline output.
+Contract (Phase 2A + decision (b), docs/CLASSIFIER_DECISION.md):
+- Accepts a feature mapping with exactly the 43 frozen CLASSIFIER_FEATURES
+  (model_version="new", default) or the 36 CLASSIFIER_FEATURES_OLD including
+  the categorical dominant_land_cover (model_version="old").
+- validate_*_features() guards the schema (set equality); non-numeric values
+  raise SchemaViolation.
+- Scaling happens inside classify() (the scaler is an inference concern, not
+  the caller's).
+- Returns a PredictionResult; never raw model output. classifier_model_used
+  names the model that answered ("mlp_v1" | "gbm_v1").
 """
 
 from __future__ import annotations
@@ -13,15 +18,18 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-import pandas as pd
-
 from app.feature_schema import (
-    FEATURE_NAMES,
-    MODEL_CLASSES,
+    CLASSIFIER_MODEL_VERSION,
+    CLASSIFIER_USED_NEW,
+    DATASET_VERSION,
+    SCHEMA_VERSION,
     SchemaViolation,
-    validate_features,
+    resolve_classifier_version,
+    validate_classifier_features,
+    validate_classifier_features_old,
 )
-from app.ml.model_loader import get_model
+from app.ml.model_loader import get_model  # noqa: F401  (re-exported for callers)
+from app.ml.risk_score import classify
 
 logger = logging.getLogger("pyrosense.ml.inference")
 
@@ -32,9 +40,10 @@ class PredictionResult:
     probabilities: dict[str, float]
     confidence: float
     features: dict[str, float | str]
-    model_version: str = ""
-    dataset_version: str = ""
-    feature_schema_version: str = ""
+    classifier_model_used: str = CLASSIFIER_USED_NEW
+    model_version: str = CLASSIFIER_MODEL_VERSION
+    dataset_version: str = DATASET_VERSION
+    feature_schema_version: str = SCHEMA_VERSION
     prediction_timestamp: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
@@ -49,29 +58,34 @@ class PredictionResult:
         }
 
 
-def predict(features: dict[str, object]) -> PredictionResult:
-    """Validate + run inference on one hotspot's 36 features.
+def predict(features: dict[str, object], model_version: str | None = None) -> PredictionResult:
+    """Validate + run the requested classifier on one hotspot's feature payload.
 
-    Raises SchemaViolation on any schema problem (leakage columns, unknown
-    columns, missing features, bad types/values).
+    model_version: "new" (default, MLP) or "old" (legacy GBM) — see
+    docs/CLASSIFIER_DECISION.md. Raises SchemaViolation on any schema problem
+    (missing/unknown features, non-numeric values, bad version).
     """
-    validated = validate_features(features, strict=True)
+    version = resolve_classifier_version(model_version)
+    if version == "old":
+        validate_classifier_features_old(features)
+    else:
+        validate_classifier_features(features)
 
-    model = get_model()
-    row = {name: validated.get(name) for name in FEATURE_NAMES}
-    frame = pd.DataFrame([row], columns=list(FEATURE_NAMES))
+    try:
+        result = classify(features, model_version=version)
+    except (TypeError, ValueError) as exc:
+        raise SchemaViolation(f"non-numeric feature value: {exc}") from exc
 
-    probs = model.pipeline.predict_proba(frame)[0]
-    pred_label = str(model.pipeline.predict(frame)[0])
-
-    prob_map = {cls: round(float(p), 6) for cls, p in zip(model.classes, probs)}
-
+    logger.debug(
+        "classified via %s: %s (confidence=%.4f)",
+        result["classifier_model_used"],
+        result["predicted_class"],
+        result["confidence"],
+    )
     return PredictionResult(
-        predicted_class=pred_label,
-        probabilities=prob_map,
-        confidence=round(float(max(probs)), 6),
-        features=dict(validated),
-        model_version=model.model_version,
-        dataset_version=model.dataset_version,
-        feature_schema_version=model.feature_schema_version,
+        predicted_class=result["predicted_class"],
+        probabilities=result["probabilities"],
+        confidence=result["confidence"],
+        features=dict(features),
+        classifier_model_used=result["classifier_model_used"],
     )

@@ -9,7 +9,15 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.engine import get_session_factory
-from app.feature_schema import DATASET_VERSION, FEATURE_NAMES, MODEL_VERSION, SCHEMA_VERSION
+from app.feature_schema import (
+    CLASSIFIER_FEATURES,
+    CLASSIFIER_FEATURES_OLD,
+    CLASSIFIER_MODEL_VERSION,
+    CLASSIFIER_USED_NEW,
+    CLASSIFIER_USED_OLD,
+    DATASET_VERSION,
+    SCHEMA_VERSION,
+)
 from app.ml.model_loader import is_loaded
 
 router = APIRouter()
@@ -37,8 +45,10 @@ async def health(session: AsyncSession = Depends(get_db)):
         "service": "pyrosense-ml",
         "model_loaded": is_loaded(),
         "postgres_connected": pg_ok,
-        "model_version": MODEL_VERSION,
+        "model_version": CLASSIFIER_MODEL_VERSION,
         "dataset_version": DATASET_VERSION,
         "feature_schema_version": SCHEMA_VERSION,
-        "feature_count": len(FEATURE_NAMES),
+        "feature_count": len(CLASSIFIER_FEATURES),
+        "classifiers_available": [CLASSIFIER_USED_NEW, CLASSIFIER_USED_OLD],
+        "legacy_gbm_features": len(CLASSIFIER_FEATURES_OLD),
     }

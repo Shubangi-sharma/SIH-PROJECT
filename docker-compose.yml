@@ -1,0 +1,73 @@
+# Phase 5.3 — local/demo parity stack (PDF §16 architecture):
+#   Postgres/PostGIS (feature store) ← pyrosense_ml (FastAPI, internal)
+#   ← Node BFF (:4000) ← Next.js frontend (:3000, run via `npm run dev`)
+#
+#   docker compose up -d db && docker compose up ml backend
+#
+# The frontend is deliberately NOT containerized: Next dev hot-reload is
+# unbearable through a bind-mounted volume, and SIH demos run it locally.
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: pyrosense
+      POSTGRES_PASSWORD: pyrosense
+      POSTGRES_DB: pyrosense_ml
+    ports:
+      # Host 5432 (local Postgres) and 5433 (existing pyrosense-ml-postgis
+      # container) are commonly taken — expose on 5434. Inside the compose
+      # network services still use `db:5432`.
+      - "5434:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pyrosense -d pyrosense_ml"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  ml:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pyrosense:pyrosense@db:5432/pyrosense_ml
+      # The seed's fallback path reads the Node backend's SQLite file, which
+      # is not part of this image — seeding stays a host-side/ops concern.
+      # Live data flows in via POST /internal/pipeline/run (Node's cron).
+      SEED_ON_STARTUP: "false"
+      ENABLE_LIVE_INGEST_SCHEDULER: "false" # Node's cron stays the single scheduler
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      FIRMS_MAP_KEY: ${FIRMS_MAP_KEY:-}
+    ports:
+      - "5000:5000"
+    depends_on:
+      db:
+        condition: service_healthy
+    # The internal ML service is reached ONLY by the Node BFF inside the
+    # compose network; the port mapping above is for local curl debugging.
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      PORT: "4000"
+      DATABASE_URL: /data/pyrosense.db
+      ML_API_BASE_URL: http://ml:5000
+      FIRMS_MAP_KEY: ${FIRMS_MAP_KEY}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      CORS_ORIGIN: http://localhost:*,http://127.0.0.1:*
+    ports:
+      # Host 4000 is usually the dev backend already running — map the
+      # compose instance to 4001. Inside the network it's still 4000.
+      - "4001:4000"
+    volumes:
+      - backend-data:/data
+    depends_on:
+      - ml
+
+volumes:
+  pgdata:
+  backend-data:

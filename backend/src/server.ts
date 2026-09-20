@@ -13,6 +13,7 @@ import { db, getAllFacilitiesMerged } from "./db/client.js";
 import { refreshLive } from "./jobs/refreshLiveFirms.js";
 import { runMatchingJob } from "./jobs/runMatching.js";
 import { updateFingerprints } from "./services/fingerprintService.js";
+import { triggerPipeline } from "./services/mlClient.js";
 import cron from "node-cron";
 
 const log = logger.child({ module: "server" });
@@ -51,6 +52,19 @@ const server = app.listen(env.PORT, "0.0.0.0", () => {
     runPipeline().catch((err) => log.error({ err: String(err) }, "scheduled pipeline failed"));
   });
   log.info("scheduled full pipeline (refresh → match → fingerprint) every 15 minutes");
+
+  // Phase 2C/3: nightly ML pipeline via pyrosense_ml (weather → H3 aggregate
+  // → GRU risk → hotspot persistence). Node's node-cron stays the single
+  // scheduler (PDF §2.2) — it just triggers FastAPI's batch endpoint now.
+  // 02:30 IST-ish nightly; weather fetch lands rows up to the archive's ~6-day
+  // lag, so days=10 covers the fill window.
+  cron.schedule("30 21 * * *", () => {
+    triggerPipeline(10).then((report) => {
+      if (report) log.info({ report }, "ML pipeline triggered");
+      else log.error("ML pipeline trigger failed (breaker or transport)");
+    });
+  });
+  log.info("scheduled ML pipeline trigger (pyrosense_ml) nightly at 21:30 UTC");
 });
 
 async function shutdown(signal: string): Promise<void> {

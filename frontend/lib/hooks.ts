@@ -14,7 +14,7 @@
 import useSWR, { SWRConfiguration } from "swr";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { parseFirmsCsv } from "./firms";
-import { fetchAnalyses, fetchCommand, fetchFacilities, fetchFirmsCsv, postChat, type ChatHistoryTurn } from "./api";
+import { fetchAnalyses, fetchCommand, fetchFirmsCsv, postChat, type ChatHistoryTurn } from "./api";
 import { fetchMlHotspots, type MlHotspotSummaryDto, type MlHotspotsResponseDto } from "./mlApi";
 import type { Facility, FacilityAnalysis, CommandView, ChatMessage } from "./types";
 import type { FacilityAnalysisDto, CommandViewDto } from "./api";
@@ -67,58 +67,6 @@ function toAnalysis(a: FacilityAnalysisDto): FacilityAnalysis {
     nearestKm: a.nearestKm,
     detectionCount: a.detectionCount,
     liveConfidenceSplit: a.liveConfidenceSplit,
-  };
-}
-
-/* ------------------------------------------------------------------ */
-/* facilities — ingested OSM catalogue via the backend                  */
-/* ------------------------------------------------------------------ */
-
-/** OSM sites barely change; the backend caches them for 24 h. */
-const FACILITIES_REFRESH_INTERVAL = 3_600_000;
-
-export function useFacilities(
-  bboxes: BBox[],
-  options?: SWRConfiguration,
-): {
-  facilities: Facility[];
-  error: boolean;
-  isValidating: boolean;
-  isLoading: boolean;
-} {
-  const key = useMemo(
-    () =>
-      bboxes.length > 0
-        ? (["facilities", ...bboxes.map(bboxToString)] as const)
-        : null, // null key = don't fetch
-    [bboxes],
-  );
-
-  const { data, error, isValidating, isLoading } = useSWR<{ facilities: Facility[]; count: number }>(
-    key,
-    async ([, ...bboxesStr]: readonly [string, ...string[]]) => {
-      // chunked: one request per bbox, fetched in parallel, merged (§4)
-      const results = await Promise.all(bboxesStr.map((b) => fetchFacilities(b)));
-      const seen = new Set<string>();
-      const facilities = results
-        .flatMap((r) => r.facilities)
-        .filter((f) => (seen.has(f.id) ? false : (seen.add(f.id), true)))
-        .map(toFacility);
-      return { facilities, count: facilities.length };
-    },
-    {
-      revalidateOnFocus: false,
-      revalidateIfStale: false,
-      dedupingInterval: FACILITIES_REFRESH_INTERVAL,
-      ...options,
-    },
-  );
-
-  return {
-    facilities: data?.facilities ?? [],
-    error: !!error,
-    isValidating,
-    isLoading: isLoading && (data?.facilities.length ?? 0) === 0,
   };
 }
 
