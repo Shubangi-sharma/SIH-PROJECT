@@ -11,7 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.engine import get_session_factory
 from app.feature_schema import (
     CLASSIFIER_FEATURES,
+    CLASSIFIER_FEATURES_OLD,
     CLASSIFIER_MODEL_VERSION,
+    CLASSIFIER_USED_NEW,
+    CLASSIFIER_USED_OLD,
     DATASET_VERSION,
     SCHEMA_VERSION,
 )
@@ -46,4 +49,6 @@ async def health(session: AsyncSession = Depends(get_db)):
         "dataset_version": DATASET_VERSION,
         "feature_schema_version": SCHEMA_VERSION,
         "feature_count": len(CLASSIFIER_FEATURES),
+        "classifiers_available": [CLASSIFIER_USED_NEW, CLASSIFIER_USED_OLD],
+        "legacy_gbm_features": len(CLASSIFIER_FEATURES_OLD),
     }

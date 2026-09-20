@@ -1,9 +1,10 @@
-"""Model loader — loads the MLP classifier + 3 GRU risk models ONCE at startup.
+"""Model loader — loads MLP classifier + OLD GBM + 3 GRU risk models ONCE at startup.
 
-Contract (Phase 2A):
-- Six artifacts load together into ONE cached LoadedModels object: the Keras
-  classifier, its scaler, its label encoder, the three horizon GRU models,
-  and the risk scaler. The app needs both models available at once.
+Contract (Phase 2A + decision (b), see docs/CLASSIFIER_DECISION.md):
+- Seven artifacts load together into ONE cached LoadedModels object: the Keras
+  classifier, its scaler, its label encoder, the OLD Gradient Boosting
+  pipeline (kept per decision (b) — callable via model_version="old"), the
+  three horizon GRU models, and the risk scaler.
 - Everything is validated against app.feature_schema at load time. Any
   mismatch is a hard startup failure — a ML service that cannot prove its
   models match the frozen schema must not serve.
@@ -19,7 +20,9 @@ from typing import Any
 
 from app.feature_schema import (
     CLASSIFIER_CLASSES,
+    CLASSIFIER_CLASSES_OLD,
     CLASSIFIER_FEATURES,
+    CLASSIFIER_FEATURES_OLD,
     RISK_FEATURES,
     RISK_SEQUENCE_LENGTH,
 )
@@ -51,6 +54,8 @@ RISK_MODEL_PATHS = {
     "3day": os.path.join(_DATA_SCIENCE, "risk_prediction", "models", "gru_3day_best.keras"),
     "7day": os.path.join(_DATA_SCIENCE, "risk_prediction", "models", "gru_7day_best.keras"),
 }
+# OLD GBM kept per docs/CLASSIFIER_DECISION.md decision (b): model_version="old".
+GBM_MODEL_PATH = os.path.join(_REPO_ROOT, "FINAL_GRADIENT_BOOSTING_MODEL.pkl")
 
 
 @dataclass
@@ -58,6 +63,7 @@ class LoadedModels:
     classifier: Any
     classifier_scaler: Any
     label_encoder: Any
+    gbm_pipeline: Any | None = None
     risk_models: dict[str, Any] = field(default_factory=dict)
     risk_scaler: Any = None
 
@@ -66,7 +72,7 @@ _models: LoadedModels | None = None
 
 
 def load_model() -> LoadedModels:
-    """Load + validate all six artifacts. Idempotent; safe to call at startup."""
+    """Load + validate all seven artifacts. Idempotent; safe to call at startup."""
     global _models
     if _models is not None:
         return _models
@@ -112,17 +118,38 @@ def load_model() -> LoadedModels:
         risk_models[horizon] = model
     risk_scaler = joblib.load(RISK_SCALER_PATH)
 
+    # ── OLD GBM classifier (decision (b): keep-alongside, model_version="old")
+    logger.info("loading legacy GBM classifier from %s", GBM_MODEL_PATH)
+    gbm_pipeline = joblib.load(GBM_MODEL_PATH)
+    gbm_features = [str(f) for f in getattr(gbm_pipeline, "feature_names_in_", [])]
+    if gbm_features != list(CLASSIFIER_FEATURES_OLD):
+        raise RuntimeError(
+            "legacy GBM schema mismatch: pipeline expects "
+            f"{len(gbm_features)} features, frozen CLASSIFIER_FEATURES_OLD has "
+            f"{len(CLASSIFIER_FEATURES_OLD)}"
+        )
+    gbm_classes = [str(c) for c in getattr(gbm_pipeline, "classes_", [])]
+    if gbm_classes != list(CLASSIFIER_CLASSES_OLD):
+        raise RuntimeError(
+            "legacy GBM classes mismatch: "
+            f"expected {list(CLASSIFIER_CLASSES_OLD)}, got {gbm_classes}"
+        )
+
     _models = LoadedModels(
         classifier=classifier,
         classifier_scaler=classifier_scaler,
         label_encoder=label_encoder,
+        gbm_pipeline=gbm_pipeline,
         risk_models=risk_models,
         risk_scaler=risk_scaler,
     )
     logger.info(
-        "models loaded: classifier(%d features, %d classes), risk horizons=%s",
+        "models loaded: classifier(%d features, %d classes), legacy_gbm(%d "
+        "features, %d classes), risk horizons=%s",
         expected_features,
         len(CLASSIFIER_CLASSES),
+        len(CLASSIFIER_FEATURES_OLD),
+        len(CLASSIFIER_CLASSES_OLD),
         sorted(risk_models),
     )
     return _models
@@ -139,14 +166,3 @@ def get_model() -> LoadedModels:
 
 def is_loaded() -> bool:
     return _models is not None
-
-
-# ── Legacy single-GBM loading path ──────────────────────────────────────────
-# superseded by MLP+GRU pipeline, Phase 2A, 2026-09-19 — safe to delete once
-# Phase 2A is confirmed stable in production.
-#
-# from app.config import settings
-#
-# def _load_legacy_gbm():
-#     import joblib
-#     return joblib.load(settings.MODEL_PATH)  # ../FINAL_GRADIENT_BOOSTING_MODEL.pkl

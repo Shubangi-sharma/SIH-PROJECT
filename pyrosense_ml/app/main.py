@@ -66,11 +66,12 @@ async def lifespan(app: FastAPI):
     loaded = load_model()
     logger.info(
         "models ready: classifier_version=%s schema=%s classifier_features=%d "
-        "classes=%s risk_horizons=%s",
+        "classes=%s legacy_gbm_loaded=%s risk_horizons=%s",
         CLASSIFIER_MODEL_VERSION,
         SCHEMA_VERSION,
         len(CLASSIFIER_FEATURES),
         list(CLASSIFIER_CLASSES),
+        loaded.gbm_pipeline is not None,
         sorted(loaded.risk_models),
     )
 

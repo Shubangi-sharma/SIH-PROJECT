@@ -20,6 +20,7 @@ error; it is never faked or silently skipped.
 from __future__ import annotations
 
 import logging
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
@@ -33,6 +34,7 @@ from app.data.live import (
 )
 from app.feature_schema import (
     CLASSIFIER_FEATURES,
+    CLASSIFIER_FEATURES_OLD,
     CLASSIFIER_MODEL_VERSION,
     DATASET_VERSION,
     SCHEMA_VERSION,
@@ -57,6 +59,10 @@ class PredictRequest(BaseModel):
     longitude: float = Field(ge=-180, le=180)
     region: str | None = None
     features: dict[str, float | str] | None = None
+    # Decision (b): "new" (default, MLP) or "old" (legacy GBM) — see
+    # docs/CLASSIFIER_DECISION.md. The response's classifier_model_used field
+    # always names the model that actually answered.
+    model_version: Literal["new", "old"] | None = None
     # Phase 2A: risk is not computable yet (no live H3 sequence pipeline).
     include_risk: bool = False
 
@@ -99,10 +105,16 @@ async def predict_endpoint(
 
     # ── 2. Schema guard → classifier ─────────────────────────────────────────
     try:
-        result = run_inference(features)
-        if body.features is not None and len(features) != len(CLASSIFIER_FEATURES):
+        expected_count = (
+            len(CLASSIFIER_FEATURES_OLD)
+            if (body.model_version or "new") == "old"
+            else len(CLASSIFIER_FEATURES)
+        )
+        result = run_inference(features, model_version=body.model_version)
+        if body.features is not None and len(features) != expected_count:
             raise SchemaViolation(
-                f"expert payload must contain all {len(CLASSIFIER_FEATURES)} features "
+                f"expert payload must contain all {expected_count} features "
+                f"for model_version={body.model_version or 'new'} "
                 f"(got {len(features)})"
             )
     except SchemaViolation as exc:
@@ -142,6 +154,7 @@ async def predict_endpoint(
         "class": result.predicted_class,
         "probabilities": result.probabilities,
         "confidence": result.confidence,
+        "classifier_model_used": result.classifier_model_used,
         "risk": None,
         "risk_unavailable": RISK_NOT_IMPLEMENTED_DETAIL,
         "explanation": explanation,

@@ -9,10 +9,11 @@ Do not hand-edit these tuples. Regenerate only via
 pyrosense_ml/scripts/_extract_feature_lists.py if the underlying
 pickles change.
 
-NOTE: this replaces the old single-model (Gradient Boosting, 36
-features) schema. There are now two independent schemas because there
-are now two independent models: a classifier and a 3-horizon risk
-predictor.
+NOTE: there are three independent schemas because there are three
+independent model families: the NEW MLP classifier (43 features), the OLD
+Gradient Boosting classifier (36 features, kept as the "old" model_version
+per docs/CLASSIFIER_DECISION.md — decision (b) keep-alongside), and the
+3-horizon GRU risk predictor (30x17 sequences).
 """
 
 from __future__ import annotations
@@ -85,6 +86,73 @@ CLASSIFIER_BOOLEAN_FEATURES: Final[tuple[str, ...]] = (
     "near_agriculture_1km",
 )
 
+# ── OLD classifier schema (Gradient Boosting, kept per decision (b)) ─────────
+# Extracted verbatim from the pre-Phase-2A feature_schema.py (git 46cba71); the
+# names come from FINAL_GRADIENT_BOOSTING_MODEL.pkl's
+# preprocessor.feature_names_in_. Kept because docs/CLASSIFIER_DECISION.md
+# decision (b) keeps the GBM callable via model_version="old". Do not hand-edit.
+
+CLASSIFIER_FEATURES_OLD: Final[tuple[str, ...]] = (
+    "total_detections",
+    "unique_days",
+    "unique_months",
+    "mean_FRP",
+    "max_FRP",
+    "active_duration_days",
+    "distance_to_industrial_km",
+    "distance_to_power_km",
+    "distance_to_mining_km",
+    "distance_to_fuel_storage_km",
+    "distance_to_agriculture_km",
+    "distance_to_transport_km",
+    "dominant_land_cover",
+    "land_cover_observations",
+    "lc_water_ratio",
+    "lc_trees_ratio",
+    "lc_grass_ratio",
+    "lc_flooded_vegetation_ratio",
+    "lc_crops_ratio",
+    "lc_shrub_and_scrub_ratio",
+    "lc_built_ratio",
+    "lc_bare_ratio",
+    "mean_temperature",
+    "max_temperature",
+    "min_temperature",
+    "mean_wind_speed",
+    "max_wind_speed",
+    "mean_dewpoint",
+    "mean_precipitation",
+    "total_precipitation",
+    "mean_solar_radiation",
+    "weather_observations",
+    "first_detection_year",
+    "first_detection_month",
+    "last_detection_year",
+    "last_detection_month",
+)
+
+assert len(CLASSIFIER_FEATURES_OLD) == 36, "frozen old classifier schema must stay at 36 features"
+
+# The one categorical column in the old schema (OneHotEncoder input).
+CLASSIFIER_CATEGORICAL_FEATURES_OLD: Final[tuple[str, ...]] = ("dominant_land_cover",)
+
+VALID_LAND_COVER_CATEGORIES_OLD: Final[tuple[str, ...]] = (
+    "bare",
+    "built",
+    "crops",
+    "shrub_and_scrub",
+    "trees",
+    "water",
+)
+
+# ── Past/model labels surfaced to API consumers ────────────────────────────
+# classifier_model_used values, so downstream never has to guess which model
+# answered (see docs/CLASSIFIER_DECISION.md).
+
+CLASSIFIER_USED_NEW: Final[str] = "mlp_v1"
+CLASSIFIER_USED_OLD: Final[str] = "gbm_v1"
+CLASSIFIER_MODEL_VERSIONS: Final[tuple[str, ...]] = ("new", "old")
+
 CLASSIFIER_NUMERIC_FEATURES: Final[tuple[str, ...]] = tuple(
     n for n in CLASSIFIER_FEATURES if n not in CLASSIFIER_BOOLEAN_FEATURES
 )
@@ -110,6 +178,15 @@ CLASSIFIER_CLASSES: Final[tuple[str, ...]] = (
     "Industrial",
     "Infrastructure_Energy",
     "Mining",
+)
+
+# --- OLD GBM's predict_proba column order (from the pickle's classes_) ---
+
+CLASSIFIER_CLASSES_OLD: Final[tuple[str, ...]] = (
+    "Agricultural_Vegetation",
+    "Industrial",
+    "Mining_Extraction",
+    "Other_Persistent_Thermal_Source",
 )
 
 # --- pasted verbatim from _extract_feature_lists.py output (step C1) ---
@@ -179,6 +256,44 @@ def validate_classifier_features(feature_dict: dict) -> None:
             f"classifier feature mismatch: missing={sorted(missing)}, "
             f"unexpected={sorted(extra)}"
         )
+
+
+def validate_classifier_features_old(feature_dict: dict) -> None:
+    """Same fail-hard set-equality guard, for the OLD 36-feature GBM schema."""
+    expected = set(CLASSIFIER_FEATURES_OLD)
+    actual = set(feature_dict.keys())
+    if actual != expected:
+        missing = expected - actual
+        extra = actual - expected
+        raise SchemaViolation(
+            f"old-classifier feature mismatch: missing={sorted(missing)}, "
+            f"unexpected={sorted(extra)}"
+        )
+    # Categorical column must carry a value the GBM's OneHotEncoder was fitted
+    # on — anything else means the pickle was retrained or the payload is wrong.
+    for col in CLASSIFIER_CATEGORICAL_FEATURES_OLD:
+        value = feature_dict.get(col)
+        if not isinstance(value, str) or value not in VALID_LAND_COVER_CATEGORIES_OLD:
+            raise SchemaViolation(
+                f"old-classifier categorical feature {col!r} must be one of "
+                f"{list(VALID_LAND_COVER_CATEGORIES_OLD)}, got {value!r}"
+            )
+
+
+def resolve_classifier_version(model_version: str | None) -> str:
+    """Normalize a requested classifier version; None → default ("new").
+
+    Raises SchemaViolation on anything other than "new"/"old" so bad values
+    surface as the same exception type as schema problems.
+    """
+    if model_version is None:
+        return "new"
+    if model_version not in CLASSIFIER_MODEL_VERSIONS:
+        raise SchemaViolation(
+            f"model_version must be one of {list(CLASSIFIER_MODEL_VERSIONS)}, "
+            f"got {model_version!r}"
+        )
+    return model_version
 
 
 def validate_risk_sequence_shape(sequence) -> None:
