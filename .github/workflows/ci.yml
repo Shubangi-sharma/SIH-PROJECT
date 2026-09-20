@@ -24,10 +24,8 @@ jobs:
 
       - name: Artifact verification (Phase 1 DoD)
         run: |
-          uv run python data_science/classification/scripts/verify_artifacts.py || \
-          uv run python ../../data_science/classification/scripts/verify_artifacts.py
-          uv run python data_science/risk_prediction/scripts/verify_artifacts.py || \
-          uv run python ../../data_science/risk_prediction/scripts/verify_artifacts.py
+          uv run python ../data_science/classification/scripts/verify_artifacts.py
+          uv run python ../data_science/risk_prediction/scripts/verify_artifacts.py
 
       - name: Run ML test suite
         run: uv run pytest tests/ -q
