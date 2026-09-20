@@ -1,4 +1,67 @@
-# Frontend UI Audit — 2026-09-20 (branch `integrate-dl-models`)
+# Frontend UI Audit — 2026-09-20 (initial audit on `integrate-dl-models`; re-verified on branch `frontend-ui-overhaul`)
+
+---
+
+## Re-verification — 2026-09-20, branch `frontend-ui-overhaul`
+
+An independent second pass was run on top of the work below (base: `main` @
+`528adcb`, `git pull --ff-only origin main` → "Already up to date"). Result:
+**the tree is already clean — no further deletions or additions were needed**
+for this session; findings were confirmed, not re-done.
+
+1. **Full mechanical re-sweep of every exported name** in
+   `frontend/components/*.tsx` and `frontend/lib/*.ts` (names extracted from
+   `^export` lines, not filenames):
+
+   ```bash
+   for f in frontend/components/*.tsx frontend/lib/*.ts; do
+     names=$(grep -oE '^export (default )?(async )?(function|const|class|interface|type) [A-Za-z0-9_]+' "$f" | awk '{print $NF}')
+     for n in $names; do
+       cnt=$(grep -rl --include='*.ts' --include='*.tsx' -w "$n" frontend/app frontend/components frontend/lib \
+              | grep -v "^$f$" | wc -l)
+       [ "$cnt" -eq 0 ] && echo "NOREF: $f :: $n (own-file occurrences: $(grep -cw "$n" "$f"))"
+     done
+   done
+   ```
+
+   Output: **26 names flagged, all with own-file occurrences ≥ 2** — i.e.
+   every one is used inside its own file (the "Not dead — internal use only"
+   list below, reproduced exactly). **Zero names have their definition as
+   their only occurrence ⇒ no confirmed-dead exports remain.** The deletions
+   listed in this file (commit `32f47e2`) are all still gone and nothing new
+   turned up.
+
+2. **Baseline typecheck:** `cd frontend && npx tsc --noEmit` → exit 0 before
+   any change this session.
+
+3. **OPENROUTER_API_KEY re-confirmed** (`backend/src/config/env.ts:38`):
+   `OPENROUTER_API_KEY: z.string().trim().optional().default("")` — **optional**;
+   `hasAiProvider()` (`env.ts:128`) guards both `summary.controller.ts:27` and
+   `chatService.ts:280` with graceful degradation.
+
+4. **Chat failure state re-confirmed as adequate (Step 5 skip stands):**
+   `lib/hooks.ts:283-291` (`useChat` catch → assistant bubble "Sorry, I
+   couldn't process your request. Please try again.", `provider: "fallback"`);
+   `app/chat/page.tsx:229-231` renders a `"fallback"` chip on such messages;
+   `AiSummaryBlock.tsx:44-49` labels template output "no AI provider
+   configured, or provider unavailable". Adding a separate "AI assistant
+   unavailable" empty state would duplicate three existing honest failure
+   surfaces — skipped per protocol.
+
+5. **Freshness indicator re-confirmed as covered (Step 5 skip stands):**
+   `FreshnessBadge` exists and is reused by `DetailDrawer`'s empty state (fed
+   with the newest real detection's `acqDate`/`acqTime`) and by `CellPanel`.
+
+6. **Nav audit re-confirmed:** all 8 `NAV_ITEMS` hrefs resolve to real pages;
+   `/compare` remains the only page without a nav entry (informational, see
+   Nav audit below).
+
+7. **Two-pane layout re-confirmed in code:** `app/map/page.tsx` renders
+   `flex-col lg:flex-row` with `MapCanvas` (floating basemap pill + layer
+   toggles + `RiskLegend` + status chips all intact — `MapCanvas.tsx:334-380`)
+   and a sibling `DetailDrawer`; no slide-over overlay remains.
+
+---
 
 Two-pass dead-export audit of `frontend/components/` and `frontend/lib/`, per the
 task protocol. Every exported name was extracted from the source files (not
