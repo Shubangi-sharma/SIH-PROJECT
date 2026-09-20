@@ -64,8 +64,6 @@ export function parseFirmsCsv(csv: string, now: Date = new Date()): FirmsHotspot
     .filter((h) => h.ageDays >= 0 && h.ageDays < 10);
 }
 
-export const formatDetectionTime = detectionTimestamp;
-
 /** FRP → colour gradient (teal→amber→rose), muted to match the calm palette. */
 export function frpColor(frp: number): string {
   if (frp < 2) return "#4FB3B3"; // muted teal

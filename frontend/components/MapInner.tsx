@@ -85,9 +85,6 @@ export const BASEMAPS: {
   },
 ];
 
-export const INDIA_VIEW = { center: [22.0, 79.0] as [number, number], zoom: 5 };
-export const GLOBAL_VIEW = { center: [20.0, 0.0] as [number, number], zoom: 2 };
-
 export interface MapView {
   center: [number, number];
   zoom: number;

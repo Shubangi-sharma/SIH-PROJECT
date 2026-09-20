@@ -108,18 +108,6 @@ export interface MlHotspotsResponseDto {
   hotspots: MlHotspotSummaryDto[];
 }
 
-/** GET /health response (pyrosense_ml self-report). */
-export interface MlHealthDto {
-  status: string;
-  service: string;
-  model_loaded: boolean;
-  postgres_connected: boolean;
-  model_version: string;
-  dataset_version: string;
-  feature_schema_version: string;
-  feature_count: number;
-}
-
 /* ------------------------------------------------------------------ */
 /* fetchers                                                            */
 /* ------------------------------------------------------------------ */
@@ -196,11 +184,6 @@ export function fetchMlHotspots(params?: {
   if (params?.maxLng != null) qs.set("max_lng", String(params.maxLng));
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   return fetchMlJson<MlHotspotsResponseDto>(`/api/ml/hotspots${suffix}`);
-}
-
-/** GET /api/ml/health — ML service availability probe. */
-export function fetchMlHealth(): Promise<MlHealthDto> {
-  return fetchMlJson<MlHealthDto>(`/api/ml/health`);
 }
 
 /* ------------------------------------------------------------------ */

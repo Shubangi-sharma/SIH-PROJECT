@@ -2,7 +2,6 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Satellite, X } from "lucide-react";
 import MapCanvas, {
   DEFAULT_FILTERS,
   frpBandIndex,
@@ -10,23 +9,17 @@ import MapCanvas, {
   MapFilters,
   MapMode,
 } from "@/components/MapCanvas";
-import HealthScoreRing from "@/components/HealthScoreRing";
-import SignalQualityBadge from "@/components/SignalQualityBadge";
-import WhatChangedPanel from "@/components/WhatChangedPanel";
-import AiSummaryBlock from "@/components/AiSummaryBlock";
-import IncidentTimeline from "@/components/IncidentTimeline";
+import DetailDrawer, { type DetailDrawerSelection } from "@/components/DetailDrawer";
 import TimelineSlider from "@/components/TimelineSlider";
 import ReplayControls from "@/components/ReplayControls";
-import CellPanel from "@/components/CellPanel";
 import RiskLegend from "@/components/RiskLegend";
 import { useReplay, replayActiveEventIndex } from "@/lib/replay";
-import { FirmsHotspotDetail } from "@/components/MapMarkerTooltips";
 import type { Basemap, MapView } from "@/components/MapInner";
 import { useDebounced, useAnalyses, useFirms } from "@/lib/hooks";
 import { fetchFacilityAnalysis, fetchSummary } from "@/lib/api";
 import { BBox, REGION_BBOXES, stateForPoint } from "@/lib/regions";
-import { FacilityNarrative, RiskStatus, statusColorHex } from "@/lib/types";
-import { FirmsHotspot, frpColor } from "@/lib/firms";
+import type { FacilityNarrative } from "@/lib/types";
+import type { FirmsHotspot } from "@/lib/firms";
 import { haversineKm } from "@/lib/geo";
 import clsx from "clsx";
 
@@ -43,39 +36,6 @@ function bboxContained(inner: BBox, outer: BBox): boolean {
 
 /** §5: map-driven refetches wait ≥500 ms after the map stops moving. */
 const VIEWPORT_DEBOUNCE_MS = 500;
-
-/** Live telemetry readouts for the selected facility. */
-function MonoStat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-border-hairline bg-bg-inset px-2.5 py-2">
-      <div className="text-[10px] uppercase tracking-wider text-text-tertiary">
-        {label}
-      </div>
-      <div className="mt-0.5 truncate font-mono text-xs text-text-primary">
-        {value}
-      </div>
-    </div>
-  );
-}
-
-/** Skeleton block matching the detail slide-over layout (design.md). */
-function DetailSkeleton() {
-  return (
-    <div className="pyro-scroll flex-1 space-y-5 overflow-y-auto p-5" aria-hidden>
-      <div className="flex items-center gap-5 rounded-xl bg-bg-surface p-5">
-        <div className="h-[120px] w-[120px] animate-pulse rounded-full bg-bg-raised" />
-        <div className="ml-auto grid w-[150px] grid-cols-1 gap-2">
-          {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="h-11 animate-pulse rounded-lg bg-bg-raised" />
-          ))}
-        </div>
-      </div>
-      {[0, 1, 2].map((i) => (
-        <div key={i} className="h-28 animate-pulse rounded-xl bg-bg-surface" />
-      ))}
-    </div>
-  );
-}
 
 export default function MapPage() {
   const router = useRouter();
@@ -113,6 +73,16 @@ export default function MapPage() {
       setSelectedHotspotKey(null);
     }
   }, []);
+
+  /* -------- persistent detail drawer (right pane / bottom sheet) --------
+     Layout change only: the selection state above flows exactly as before,
+     but instead of a slide-over overlay it fills a persistent pane. Any new
+     selection auto-expands the drawer (mirroring the old auto-open);
+     collapsing stays operator-controlled. */
+  const [drawerCollapsed, setDrawerCollapsed] = useState(false);
+  useEffect(() => {
+    if (selectedId || selectedHotspotKey || selectedCell) setDrawerCollapsed(false);
+  }, [selectedId, selectedHotspotKey, selectedCell]);
 
   /* -------- backend data: computed analyses + stored detections -------- */
   const regionBboxes = REGION_BBOXES[mode];
@@ -183,8 +153,6 @@ export default function MapPage() {
     [analyses, filters.state, filters.riskStatuses],
   );
 
-  /* -------- selected facility: backend narrative + grounded AI summary ------- */
-
   /** The pinned FIRMS hotspot object, resolved from its marker key. */
   const selectedHotspot: FirmsHotspot | null = useMemo(() => {
     if (!selectedHotspotKey) return null;
@@ -216,20 +184,6 @@ export default function MapPage() {
       .slice(0, 6)
       .map((x) => x.analysis);
   }, [selectedHotspot, analyses]);
-
-  /** Detections near the selected FACILITY (context for its narrative). */
-  const relatedDetections = useMemo(() => {
-    if (!selected) return [];
-    return filteredHotspots
-      .map((h) => ({
-        hotspot: h,
-        nearestKm: haversineKm(selected.facility.lat, selected.facility.lng, h.latitude, h.longitude),
-      }))
-      .filter((x) => x.nearestKm <= 5)
-      .sort((x, y) => x.nearestKm - y.nearestKm)
-      .slice(0, 8)
-      .map((x) => ({ ...x.hotspot, nearestKm: x.nearestKm }));
-  }, [selected, filteredHotspots]);
 
   // Fetch the facility's computed narrative (What Changed + timeline) from
   // the backend; the AI summary is fetched separately so it can regenerate
@@ -309,325 +263,127 @@ export default function MapPage() {
     setViewport({ west: b[0], south: b[1], east: b[2], north: b[3] });
   }, []);
 
+  /** Drawer selection: the three mutually exclusive selection kinds, else the
+      live-summary empty state. Exactly one drawer state renders at a time. */
+  const drawerSelection: DetailDrawerSelection = selected
+    ? {
+        kind: "facility",
+        analysis: selected,
+        narrative,
+        summary,
+        timelineActiveIndex: narrative ? replayActiveEventIndex(narrative.timeline, replay) : null,
+        onClose: () => setSelectedId(null),
+        onViewSatellite: viewInSatellite,
+        onOpenFullPage: () => router.push(`/facilities/${selected.facility.id}`),
+      }
+    : selectedHotspot
+      ? {
+          kind: "hotspot",
+          hotspot: selectedHotspot,
+          relatedFacilities,
+          onClose: () => setSelectedHotspotKey(null),
+          onSelectFacility: (id: string) => {
+            setSelectedHotspotKey(null);
+            setSelectedId(id);
+          },
+          onViewSatellite: () => {
+            setBasemap("satellite");
+            setView({
+              center: [selectedHotspot.latitude, selectedHotspot.longitude],
+              zoom: 13,
+              key: `sat-hotspot-${selectedHotspotKey}-${Date.now()}`,
+            });
+          },
+        }
+      : selectedCell
+        ? { kind: "cell", h3Cell: selectedCell, onClose: () => setSelectedCell(null) }
+        : { kind: "empty" };
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="relative min-h-0 flex-1">
-        <MapCanvas
-          view={view}
-          analyses={filteredAnalyses}
-          selectedId={selectedId}
-          onSelect={handleSelect}
-          mode={mode}
-          onModeChange={handleModeChange}
-          layers={layers}
-          onToggleLayer={toggleLayer}
-          tilesLoading={firmsLoading && !analyses.length}
-          basemap={basemap}
-          onBasemapChange={handleBasemapChange}
-          firmsHotspots={filteredHotspots}
-          selectedHotspotKey={selectedHotspotKey}
-          onSelectHotspot={handleSelectHotspot}
-          onViewport={handleViewport}
-          onCellClick={handleCellClick}
-          filters={filters}
-          onFiltersChange={setFilters}
-        >
-          {/* FIRMS feed status — always honest: live count or explicit error */}
-          <div
-            role="status"
-            className={clsx(
-              "absolute bottom-12 right-4 z-[1000] flex items-center gap-2 rounded-md border px-2.5 py-1.5 font-mono text-[11px] shadow-lg shadow-black/40",
-              firmsError
-                ? "border-border-strong bg-bg-void/90 text-status-watch"
-                : "border-border-hairline bg-bg-raised/95 text-text-secondary",
-            )}
+      {/* two-pane layout: map (left/top) + persistent DetailDrawer
+          (right pane on lg:+, bottom sheet below lg:) */}
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+        <div className="relative min-h-0 flex-1">
+          <MapCanvas
+            view={view}
+            analyses={filteredAnalyses}
+            selectedId={selectedId}
+            onSelect={handleSelect}
+            mode={mode}
+            onModeChange={handleModeChange}
+            layers={layers}
+            onToggleLayer={toggleLayer}
+            tilesLoading={firmsLoading && !analyses.length}
+            basemap={basemap}
+            onBasemapChange={handleBasemapChange}
+            firmsHotspots={filteredHotspots}
+            selectedHotspotKey={selectedHotspotKey}
+            onSelectHotspot={handleSelectHotspot}
+            onViewport={handleViewport}
+            onCellClick={handleCellClick}
+            filters={filters}
+            onFiltersChange={setFilters}
           >
-            <span
-              className={clsx(
-                "inline-block h-1.5 w-1.5 rounded-full",
-                firmsError ? "bg-status-watch" : "animate-pulse bg-accent-secondary",
-              )}
-            />
-            {firmsError
-              ? "FIRMS feed unavailable"
-              : replay.currentDate
-                ? `VIIRS · replay ${replay.label} · ${replay.currentDate}`
-                : `VIIRS · ${filteredHotspots.length} detections${filterDate ? ` (${filterDate})` : " (10d)"}${filters.frpBand != null ? " · FRP filtered" : ""}`}
-          </div>
-
-          {/* risk-signal legend — threshold wording, never probabilities
-              (LIMITATIONS.md §3; the 7-day caveat comes from the model card) */}
-          <RiskLegend className="absolute bottom-24 right-4 z-[1000] w-[268px] rounded-xl border border-border-hairline bg-bg-surface/95 p-3.5 shadow-lg shadow-black/40 backdrop-blur" />
-
-          {/* timeline scrubber (hide while replay owns the date filter) */}
-          {!replay.currentDate && (
-            <TimelineSlider
-              hotspots={hotspots}
-              onFilterDate={setFilterDate}
-              className="absolute bottom-4 left-4 right-[420px] z-[1000]"
-            />
-          )}
-
-          {/* replay transport — appears only when a facility is selected (B1) */}
-          <ReplayControls replay={replay} className="absolute bottom-4 left-4 z-[1000]" />
-
-          {/* backend status chips */}
-          {analysesError && (
+            {/* FIRMS feed status — always honest: live count or explicit error */}
             <div
               role="status"
-              className="absolute left-4 top-[52px] z-[1000] rounded-md border border-border-strong bg-bg-void/90 px-2.5 py-1.5 font-mono text-[11px] text-status-watch shadow-lg shadow-black/40"
+              className={clsx(
+                "absolute bottom-12 right-4 z-[1000] flex items-center gap-2 rounded-md border px-2.5 py-1.5 font-mono text-[11px] shadow-lg shadow-black/40",
+                firmsError
+                  ? "border-border-strong bg-bg-void/90 text-status-watch"
+                  : "border-border-hairline bg-bg-raised/95 text-text-secondary",
+              )}
             >
-              Backend analyses unavailable
-            </div>
-          )}
-
-          {/* ---------------- H3 cell slide-over (§10 click panel) --------
-              Renders for a background-map click; mutually exclusive with
-              the facility/hotspot panels below. */}
-          {selectedCell && !selected && !selectedHotspot && (
-            <div className="absolute right-0 top-0 z-[1150] h-full">
-              <CellPanel h3Cell={selectedCell} onClose={() => setSelectedCell(null)} />
-            </div>
-          )}
-
-          {/* ---------------- detail slide-over (on demand) ----------------
-              Opens for either a facility OR a pinned FIRMS hotspot, so the
-              pattern behind a hotspot can actually be studied in depth. */}
-          <aside
-            aria-hidden={!selected && !selectedHotspot}
-            className={clsx(
-              "absolute right-0 top-0 z-[1100] flex h-full w-full max-w-[400px] flex-col border-l border-border-hairline bg-bg-base shadow-2xl shadow-black/60 transition-transform duration-300",
-              selected || selectedHotspot ? "translate-x-0" : "translate-x-full",
-            )}
-          >
-            {selected && (
-              <>
-                <div className="flex items-start gap-3 border-b border-border-hairline p-5">
-                  <div className="min-w-0">
-                    <h2 className="font-display text-lg font-semibold leading-snug text-text-primary">
-                      {selected.facility.name}
-                    </h2>
-                    <p className="mt-0.5 text-xs text-text-secondary">
-                      {selected.facility.type} · OSM {selected.facility.id.replace("osm-", "")}
-                    </p>
-                    {selected.detectionCount > 0 && (
-                      <span className="mt-1.5 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-accent-secondary"
-                        style={{ backgroundColor: "rgba(6,182,212,0.14)" }}
-                      >
-                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent-secondary" />
-                        FIRMS-confirmed
-                      </span>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedId(null)}
-                    aria-label="Close facility detail"
-                    className="ml-auto flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-text-tertiary transition-colors duration-150 hover:bg-bg-raised hover:text-text-primary"
-                  >
-                    <X size={16} />
-                  </button>
-                </div>
-
-                {narrative ? (
-                  <div className="pyro-scroll flex-1 space-y-5 overflow-y-auto p-5">
-                    {/* health signal — the ONE prominent status element.
-                        B3: during replay the ring is explicitly labelled
-                        "Today's assessment" — historical scores are not
-                        recomputed, only real detections replay. */}
-                    <div className="flex items-center gap-5 rounded-xl bg-bg-surface p-5">
-                      <div className="flex flex-col items-center gap-2">
-                        <HealthScoreRing score={selected.score} status={selected.status as RiskStatus} />
-                        {replay.active && (
-                          <span
-                            className="rounded-full bg-bg-raised px-2 py-0.5 text-center font-mono text-[9px] uppercase tracking-wider text-text-tertiary"
-                            title="Scores are computed against today's data; replay shows real detections only"
-                          >
-                            Today&apos;s assessment
-                          </span>
-                        )}
-                        <SignalQualityBadge split={selected.liveConfidenceSplit} className="w-[150px]" />
-                      </div>
-                      <div className="ml-auto grid w-[150px] grid-cols-1 gap-2">
-                        <MonoStat label="Type" value={selected.facility.type} />
-                        <MonoStat
-                          label="Coordinates"
-                          value={`${selected.facility.lat.toFixed(2)}°, ${selected.facility.lng.toFixed(2)}°`}
-                        />
-                        <MonoStat
-                          label="FRP (latest)"
-                          value={
-                            selected.latestFrp != null ? `${selected.latestFrp.toFixed(1)} MW` : "no detection"
-                          }
-                        />
-                        <MonoStat
-                          label="Nearest det."
-                          value={selected.nearestKm != null ? `${selected.nearestKm.toFixed(1)} km` : "—"}
-                        />
-                      </div>
-                    </div>
-                    {selected.detectionCount === 0 && (
-                      <p className="rounded-lg border border-border-hairline bg-bg-raised px-3 py-2 text-xs text-text-secondary">
-                        No thermal activity detected — this facility sits in a quiet
-                        region of the current FIRMS window.
-                      </p>
-                    )}
-
-                    <button
-                      type="button"
-                      onClick={viewInSatellite}
-                      className="flex w-full items-center justify-center gap-2 rounded-lg border border-border-hairline bg-bg-raised py-2.5 text-xs font-medium text-text-secondary transition-colors duration-150 hover:border-border-strong hover:text-text-primary"
-                    >
-                      <Satellite size={14} />
-                      View satellite
-                    </button>
-
-                    {relatedDetections.length > 0 && (
-                      <section className="rounded-xl bg-bg-surface p-4">
-                        <h3 className="font-display text-sm font-semibold text-text-primary">
-                          Detections in the corroboration window
-                        </h3>
-                        <ul className="mt-3 space-y-1.5">
-                          {relatedDetections.map((h, i) => {
-                            const hex = frpColor(h.frp);
-                            return (
-                              <li
-                                key={`${h.acqDate}-${h.acqTime}-${i}`}
-                                className="flex items-center gap-2.5 rounded-lg border border-border-hairline bg-bg-inset px-2.5 py-1.5"
-                              >
-                                <span
-                                  className="inline-block h-2 w-2 flex-shrink-0 rounded-full"
-                                  style={{ backgroundColor: hex }}
-                                />
-                                <span className="font-mono text-[11px] text-text-primary">
-                                  {h.frp.toFixed(1)} MW · {h.brightness.toFixed(0)} K
-                                </span>
-                                <span className="ml-auto font-mono text-[10px] text-text-secondary">
-                                  {h.nearestKm.toFixed(1)} km · {h.ageDays === 0 ? "today" : `${h.ageDays}d ago`}
-                                </span>
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      </section>
-                    )}
-
-                    <WhatChangedPanel rows={narrative.whatChanged} />
-                    <AiSummaryBlock text={summary?.text ?? "Generating grounded summary…"} provider={summary?.provider} />
-                    <IncidentTimeline
-                      events={narrative.timeline}
-                      activeIndex={replayActiveEventIndex(narrative.timeline, replay)}
-                    />
-
-                    <button
-                      type="button"
-                      onClick={() => router.push(`/facilities/${selected.facility.id}`)}
-                      className="w-full rounded-lg py-1 text-center text-xs font-medium text-accent-primary transition-colors duration-150 hover:text-accent-secondary"
-                    >
-                      Open full facility page →
-                    </button>
-                  </div>
-                ) : (
-                  <DetailSkeleton />
+              <span
+                className={clsx(
+                  "inline-block h-1.5 w-1.5 rounded-full",
+                  firmsError ? "bg-status-watch" : "animate-pulse bg-accent-secondary",
                 )}
-              </>
+              />
+              {firmsError
+                ? "FIRMS feed unavailable"
+                : replay.currentDate
+                  ? `VIIRS · replay ${replay.label} · ${replay.currentDate}`
+                  : `VIIRS · ${filteredHotspots.length} detections${filterDate ? ` (${filterDate})` : " (10d)"}${filters.frpBand != null ? " · FRP filtered" : ""}`}
+            </div>
+
+            {/* risk-signal legend — threshold wording, never probabilities
+                (LIMITATIONS.md §3; the 7-day caveat comes from the model card) */}
+            <RiskLegend className="absolute bottom-24 right-4 z-[1000] w-[268px] rounded-xl border border-border-hairline bg-bg-surface/95 p-3.5 shadow-lg shadow-black/40 backdrop-blur" />
+
+            {/* timeline scrubber (hide while replay owns the date filter) */}
+            {!replay.currentDate && (
+              <TimelineSlider
+                hotspots={hotspots}
+                onFilterDate={setFilterDate}
+                className="absolute bottom-4 left-4 right-4 z-[1000]"
+              />
             )}
 
-            {/* pinned FIRMS hotspot study card */}
-            {selectedHotspot && (
-              <div className="flex items-start gap-3 border-b border-border-hairline p-5">
-                <div className="min-w-0">
-                  <h2 className="font-display text-lg font-semibold leading-snug text-text-primary">
-                    Thermal hotspot
-                  </h2>
-                  <p className="mt-0.5 text-xs text-text-secondary">
-                    {selectedHotspot.satellite} {selectedHotspot.instrument} · VIIRS active-fire detection
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setSelectedHotspotKey(null)}
-                  aria-label="Close hotspot detail"
-                  className="ml-auto flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-text-tertiary transition-colors duration-150 hover:bg-bg-raised hover:text-text-primary"
-                >
-                  <X size={16} />
-                </button>
+            {/* replay transport — appears only when a facility is selected (B1) */}
+            <ReplayControls replay={replay} className="absolute bottom-4 left-4 z-[1000]" />
+
+            {/* backend status chips */}
+            {analysesError && (
+              <div
+                role="status"
+                className="absolute left-4 top-[52px] z-[1000] rounded-md border border-border-strong bg-bg-void/90 px-2.5 py-1.5 font-mono text-[11px] text-status-watch shadow-lg shadow-black/40"
+              >
+                Backend analyses unavailable
               </div>
             )}
-            {selectedHotspot && (
-              <div className="pyro-scroll flex-1 space-y-5 overflow-y-auto p-5">
-                <FirmsHotspotDetail hotspot={selectedHotspot} />
-                <button
-                  type="button"
-                  onClick={() => {
-                    setBasemap("satellite");
-                    setView({
-                      center: [selectedHotspot.latitude, selectedHotspot.longitude],
-                      zoom: 13,
-                      key: `sat-hotspot-${selectedHotspotKey}-${Date.now()}`,
-                    });
-                  }}
-                  className="flex w-full items-center justify-center gap-2 rounded-lg border border-border-hairline bg-bg-raised py-2.5 text-xs font-medium text-text-secondary transition-colors duration-150 hover:border-border-strong hover:text-text-primary"
-                >
-                  <Satellite size={14} />
-                  View satellite
-                </button>
-                {relatedFacilities.length > 0 && (
-                  <section>
-                    <h3 className="font-display text-sm font-semibold text-text-primary">
-                      Nearby facilities — is this hotspot corroborated?
-                    </h3>
-                    <p className="mt-1 text-xs leading-snug text-text-secondary">
-                      Facilities whose corroboration radius (5 km) covers this
-                      detection. Their classification already includes it.
-                    </p>
-                    <div className="mt-3 space-y-2">
-                      {relatedFacilities.map((a) => (
-                        <button
-                          key={a.facility.id}
-                          type="button"
-                          onClick={() => {
-                            setSelectedHotspotKey(null);
-                            setSelectedId(a.facility.id);
-                          }}
-                          className="flex w-full items-center gap-3 rounded-lg border border-border-hairline bg-bg-surface px-3 py-2.5 text-left transition-colors duration-150 hover:border-border-strong hover:bg-bg-raised"
-                        >
-                          <span
-                            className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full"
-                            style={{ backgroundColor: statusColorHex(a.status) }}
-                          />
-                          <span className="min-w-0">
-                            <span className="block truncate text-sm font-medium text-text-primary">
-                              {a.facility.name}
-                            </span>
-                            <span className="block text-xs text-text-secondary">
-                              {a.facility.type} · {a.detectionCount} det · score {a.score}
-                            </span>
-                          </span>
-                          <span className="ml-auto flex-shrink-0 font-mono text-[11px] text-text-secondary">
-                            {haversineKm(
-                              selectedHotspot.latitude,
-                              selectedHotspot.longitude,
-                              a.facility.lat,
-                              a.facility.lng,
-                            ).toFixed(1)}{" "}
-                            km
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </section>
-                )}
-                {relatedFacilities.length === 0 && (
-                  <p className="rounded-lg border border-border-hairline bg-bg-raised px-3 py-2 text-xs text-text-secondary">
-                    No monitored facility within 15 km — this is likely biomass
-                    burning or an unmonitored source, not industrial activity.
-                  </p>
-                )}
-              </div>
-            )}
-          </aside>
-        </MapCanvas>
+          </MapCanvas>
+        </div>
+
+        {/* persistent detail pane — renders exactly one state */}
+        <DetailDrawer
+          collapsed={drawerCollapsed}
+          onToggleCollapsed={() => setDrawerCollapsed((c) => !c)}
+          selection={drawerSelection}
+          viewportHotspots={filteredHotspots}
+          viewportAnalyses={filteredAnalyses}
+        />
       </div>
     </div>
   );

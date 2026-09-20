@@ -59,6 +59,7 @@ export default function FacilityDetailPanel({
   summary,
   riskScore,
   classification,
+  timelineActiveIndex,
   onClose,
   onViewSatellite,
   onOpenFullPage,
@@ -68,6 +69,8 @@ export default function FacilityDetailPanel({
   summary: { text: string; provider: string } | null;
   riskScore?: number;
   classification?: string;
+  /** Replay (Track B): highlights the timeline step currently shown. */
+  timelineActiveIndex?: number | null;
   onClose: () => void;
   onViewSatellite: () => void;
   onOpenFullPage: () => void;
@@ -182,8 +185,11 @@ export default function FacilityDetailPanel({
           </button>
 
           <WhatChangedPanel rows={narrative.whatChanged} />
-          <AiSummaryBlock text={summary?.text ?? "Generating grounded summary…"} />
-          <IncidentTimeline events={narrative.timeline} />
+          <AiSummaryBlock text={summary?.text ?? "Generating grounded summary…"} provider={summary?.provider} />
+          <IncidentTimeline
+            events={narrative.timeline}
+            activeIndex={timelineActiveIndex}
+          />
 
           <button
             type="button"

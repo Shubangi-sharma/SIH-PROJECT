@@ -42,33 +42,6 @@ export interface RiskHorizonEntry {
   threshold: number;
 }
 
-export interface RiskEntry {
-  h3_cell?: string;
-  horizons: Record<string, RiskHorizonEntry>;
-  overall: string;
-  status: string;
-  data_timestamp: string | null;
-  model_version?: string;
-  feature_schema_version?: string;
-}
-
-export interface RiskBatchResponse {
-  risks: Record<string, RiskEntry>;
-  missing: { h3_cell: string; status: string }[];
-  meta: ResponseMeta;
-}
-
-/** The five contextual hotspot classes (frozen feature_schema). */
-export const HOTSPOT_CLASSES = [
-  "Agricultural",
-  "Forest_Vegetation",
-  "Industrial",
-  "Infrastructure_Energy",
-  "Mining",
-] as const;
-
-export type HotspotClass = (typeof HOTSPOT_CLASSES)[number];
-
 export interface HotspotClusterDto {
   cluster_id: string;
   h3_cell: string;
@@ -85,13 +58,6 @@ export interface HotspotClusterDto {
   model_version: string | null;
   /** Surfaced verbatim from the BFF (LIMITATIONS.md §1). */
   contextual_note?: string;
-}
-
-export interface HotspotsResponse {
-  count: number;
-  hotspots: HotspotClusterDto[];
-  classes: string[];
-  meta: ResponseMeta;
 }
 
 export interface CellDetailResponse {
@@ -121,45 +87,6 @@ async function fetchV1Json<T>(path: string): Promise<T> {
     throw new Error(detail);
   }
   return (await res.json()) as T;
-}
-
-function bboxParams(bbox: { west: number; south: number; east: number; north: number }): URLSearchParams {
-  const qs = new URLSearchParams();
-  qs.set("minLat", String(bbox.south));
-  qs.set("maxLat", String(bbox.north));
-  qs.set("minLng", String(bbox.west));
-  qs.set("maxLng", String(bbox.east));
-  return qs;
-}
-
-/** GET /api/v1/risk — viewport risk (bbox auto-filled to H3-r7 cells). */
-export function fetchRiskForBbox(bbox: {
-  west: number;
-  south: number;
-  east: number;
-  north: number;
-}): Promise<RiskBatchResponse> {
-  return fetchV1Json<RiskBatchResponse>(`/api/v1/risk?${bboxParams(bbox).toString()}`);
-}
-
-/** GET /api/v1/hotspots — persistent/recent clusters for the viewport. */
-export function fetchHotspotClusters(
-  bbox?: Partial<{ west: number; south: number; east: number; north: number }> & {
-    type?: string;
-    persistent?: boolean;
-    limit?: number;
-  },
-): Promise<HotspotsResponse> {
-  const qs = bboxParams({
-    west: bbox?.west ?? -180,
-    south: bbox?.south ?? -90,
-    east: bbox?.east ?? 180,
-    north: bbox?.north ?? 90,
-  });
-  if (bbox?.type) qs.set("type", bbox.type);
-  if (bbox?.persistent !== undefined) qs.set("persistent", String(bbox.persistent));
-  if (bbox?.limit) qs.set("limit", String(bbox.limit));
-  return fetchV1Json<HotspotsResponse>(`/api/v1/hotspots?${qs.toString()}`);
 }
 
 /** GET /api/v1/cells/:h3 — one cell: risk + clusters (click-panel payload). */

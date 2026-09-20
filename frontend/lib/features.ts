@@ -88,6 +88,3 @@ export function featureLabel(feature: string): string {
 }
 
 export const FEATURE_LABELS = CURATED;
-
-/** Kept as an alias for legacy callers; resolves via featureLabel(). */
-export const FEATURE_LABEL_ALIASES: Record<string, string> = {};
