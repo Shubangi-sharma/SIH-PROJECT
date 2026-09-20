@@ -22,6 +22,7 @@ import { healthRouter } from "./routes/health.route.js";
 import { chatRouter } from "./routes/chat.route.js";
 import { commandRouter } from "./routes/command.route.js";
 import { predictRouter } from "./routes/predict.route.js";
+import { v1Router } from "./routes/v1.route.js";
 
 export function createApp(): Express {
   const app = express();
@@ -54,6 +55,10 @@ export function createApp(): Express {
   // Mounted with full paths so the shared /api rate limiter does NOT apply
   // twice; the predict route carries its own tighter bucket.
   app.use(predictRouter);
+  // Phase 3: versioned BFF routes over pyrosense_ml's internal API
+  // (risk/hotspots/cells). Same reasoning: full paths, own rate bucket via
+  // the shared /api limiter applying once here.
+  app.use(v1Router);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

@@ -1,0 +1,17 @@
+# Root build context (ml image). Keep it small and secret-free.
+.git
+.gstack
+.github
+**/.venv
+**/__pycache__
+**/.env
+**/node_modules
+**/.next
+*.zip
+*.pkl
+!data_science/**/*.pkl
+
+# Only pyrosense_ml + data_science are COPYed; drop the rest of the tree.
+backend
+frontend
+docs

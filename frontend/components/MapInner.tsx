@@ -48,13 +48,14 @@
  */
 
 import React, { useEffect, useMemo } from "react";
-import { CircleMarker, MapContainer, Marker, TileLayer, Tooltip, useMap } from "react-leaflet";
+import { CircleMarker, MapContainer, Marker, TileLayer, Tooltip, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { FacilityAnalysis, RiskStatus, statusColorHex } from "@/lib/types";
 import { FirmsHotspot, frpColor, frpRadius } from "@/lib/firms";
 import { FacilityTooltipContent, FirmsTooltipContent } from "./MapMarkerTooltips";
 import { useSupercluster, ClusterPoint } from "@/lib/useSupercluster";
+import h3Js from "h3-js";
 import clsx from "clsx";
 
 export type Basemap = "dark" | "streets" | "satellite";
@@ -111,6 +112,29 @@ function ViewportAnimator({ view }: { view: MapView }) {
     map.flyTo(view.center, view.zoom, { duration: 1.1 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view.key]);
+  return null;
+}
+
+/**
+ * ClickCatcher — maps a background-map click to its H3-r7 cell.
+ *
+ * Leaflet fires at most ONE of {background click, marker/tooltip click} per
+ * physical click, so facility/hotspot interactions never co-fire with this.
+ * The parent decides what a cell click means (the §10 click panel).
+ */
+function ClickCatcher({ onCellClick }: { onCellClick: (h3Cell: string | null) => void }) {
+  useMapEvents({
+    click(e) {
+      try {
+        // h3-js is CJS; the default interop shape differs between the Next
+        // server bundle (module.exports.default) and the client bundle.
+        const h3 = ((h3Js as unknown as { default?: typeof h3Js }).default ?? h3Js) as typeof h3Js;
+        onCellClick(h3.latLngToCell(e.latlng.lat, e.latlng.lng, 7));
+      } catch {
+        onCellClick(null); // a broken geo lib must not crash the map
+      }
+    },
+  });
   return null;
 }
 
@@ -387,6 +411,7 @@ export default function MapInner({
   onTilesLoading,
   onTilesLoaded,
   onViewport,
+  onCellClick,
 }: {
   view: MapView;
   analyses: FacilityAnalysis[];
@@ -399,7 +424,10 @@ export default function MapInner({
   onSelectHotspot: (key: string | null) => void;
   onTilesLoading: () => void;
   onTilesLoaded: () => void;
+  /** debounced upstream — fires when the user stops moving the map */
   onViewport: (b: [number, number, number, number]) => void;
+  /** background-map click → H3-r7 cell (the §10 click panel) */
+  onCellClick?: (h3Cell: string | null) => void;
 }) {
   // ── Teardown ownership ─────────────────────────────────────────────────
   // Deliberately NO manual `map.remove()` effect here. react-leaflet v4
@@ -425,6 +453,7 @@ export default function MapInner({
       <BaseLayer basemap={basemap} onLoading={onTilesLoading} onLoaded={onTilesLoaded} />
       <ViewportAnimator view={view} />
       <ViewportReporter onViewport={onViewport} />
+      <ClickCatcher onCellClick={onCellClick ?? (() => {})} />
       {showFirms && firmsHotspots.length > 0 && (
         <FirmsLayer hotspots={firmsHotspots} selectedHotspotKey={selectedHotspotKey} onSelectHotspot={onSelectHotspot} />
       )}

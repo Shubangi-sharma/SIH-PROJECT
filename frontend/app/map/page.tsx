@@ -17,6 +17,8 @@ import AiSummaryBlock from "@/components/AiSummaryBlock";
 import IncidentTimeline from "@/components/IncidentTimeline";
 import TimelineSlider from "@/components/TimelineSlider";
 import ReplayControls from "@/components/ReplayControls";
+import CellPanel from "@/components/CellPanel";
+import RiskLegend from "@/components/RiskLegend";
 import { useReplay, replayActiveEventIndex } from "@/lib/replay";
 import { FirmsHotspotDetail } from "@/components/MapMarkerTooltips";
 import type { Basemap, MapView } from "@/components/MapInner";
@@ -98,6 +100,18 @@ export default function MapPage() {
   const [selectedHotspotKey, setSelectedHotspotKey] = useState<string | null>(null);
   const handleSelectHotspot = useCallback((key: string | null) => {
     setSelectedHotspotKey(key);
+    if (key) setSelectedCell(null); // panels are mutually exclusive
+  }, []);
+
+  /* -------- §10 H3 cell click panel (risk signals + clusters) -------- */
+  const [selectedCell, setSelectedCell] = useState<string | null>(null);
+  const handleCellClick = useCallback((cell: string | null) => {
+    setSelectedCell(cell);
+    if (cell) {
+      // one panel at a time — a cell click closes facility/hotspot panels
+      setSelectedId(null);
+      setSelectedHotspotKey(null);
+    }
   }, []);
 
   /* -------- backend data: computed analyses + stored detections -------- */
@@ -253,6 +267,7 @@ export default function MapPage() {
 
   const handleSelect = useCallback((id: string) => {
     setSelectedId(id);
+    setSelectedCell(null); // panels are mutually exclusive
   }, []);
 
   const handleModeChange = useCallback(
@@ -260,6 +275,7 @@ export default function MapPage() {
       setMode(m);
       setSelectedId(null);
       setSelectedHotspotKey(null);
+      setSelectedCell(null);
       setViewport(null);
       setView(
         m === "india"
@@ -312,6 +328,7 @@ export default function MapPage() {
           selectedHotspotKey={selectedHotspotKey}
           onSelectHotspot={handleSelectHotspot}
           onViewport={handleViewport}
+          onCellClick={handleCellClick}
           filters={filters}
           onFiltersChange={setFilters}
         >
@@ -338,6 +355,10 @@ export default function MapPage() {
                 : `VIIRS · ${filteredHotspots.length} detections${filterDate ? ` (${filterDate})` : " (10d)"}${filters.frpBand != null ? " · FRP filtered" : ""}`}
           </div>
 
+          {/* risk-signal legend — threshold wording, never probabilities
+              (LIMITATIONS.md §3; the 7-day caveat comes from the model card) */}
+          <RiskLegend className="absolute bottom-24 right-4 z-[1000] w-[268px] rounded-xl border border-border-hairline bg-bg-surface/95 p-3.5 shadow-lg shadow-black/40 backdrop-blur" />
+
           {/* timeline scrubber (hide while replay owns the date filter) */}
           {!replay.currentDate && (
             <TimelineSlider
@@ -357,6 +378,15 @@ export default function MapPage() {
               className="absolute left-4 top-[52px] z-[1000] rounded-md border border-border-strong bg-bg-void/90 px-2.5 py-1.5 font-mono text-[11px] text-status-watch shadow-lg shadow-black/40"
             >
               Backend analyses unavailable
+            </div>
+          )}
+
+          {/* ---------------- H3 cell slide-over (§10 click panel) --------
+              Renders for a background-map click; mutually exclusive with
+              the facility/hotspot panels below. */}
+          {selectedCell && !selected && !selectedHotspot && (
+            <div className="absolute right-0 top-0 z-[1150] h-full">
+              <CellPanel h3Cell={selectedCell} onClose={() => setSelectedCell(null)} />
             </div>
           )}
 

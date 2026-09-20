@@ -83,6 +83,7 @@ export default function MapCanvas({
   selectedHotspotKey = null,
   onSelectHotspot,
   onViewport,
+  onCellClick,
   filters = DEFAULT_FILTERS,
   onFiltersChange,
   children,
@@ -107,6 +108,8 @@ export default function MapCanvas({
   onSelectHotspot?: (key: string | null) => void;
   /** debounced upstream — fires when the user stops moving the map */
   onViewport: (b: [number, number, number, number]) => void;
+  /** background-map click → H3-r7 cell (CellPanel); null-safe */
+  onCellClick?: (h3Cell: string | null) => void;
   /** PDF §3 filters — applied by the parent to the data it passes down */
   filters?: MapFilters;
   onFiltersChange?: (f: MapFilters) => void;
@@ -148,6 +151,7 @@ export default function MapCanvas({
           onTilesLoading={() => setTilesLoadingInternal(true)}
           onTilesLoaded={() => setTilesLoadingInternal(false)}
           onViewport={onViewport}
+          onCellClick={onCellClick}
         />
       </MapErrorBoundary>
 

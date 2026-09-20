@@ -9,6 +9,20 @@ timeline_snapshots   Daily aggregated per-hotspot snapshots (slider support).
 genai_explanations   Cached LLM explanations keyed by prediction + input hash.
 live_detections      Live FIRMS detections ingested by THIS service (only used
                      when ENABLE_LIVE_INGEST_SCHEDULER is on).
+
+Feature store (Phase 2B — the GRU/classifier pipelines' canonical input):
+firms_daily_h3       Per H3-r7 cell per day: the exact 17 RISK_FEATURES the
+                     GRUs consume, in feature_names.pkl order. The rolling
+                     30-day window is read straight from this table.
+weather_daily        Per cell per day: raw Open-Meteo daily values. Kept raw
+                     so forward-fill (<=7 days, the V3->V4 lesson) can be
+                     re-derived/re-played without re-fetching.
+risk_predictions     Latest GRU run per (cell, horizon): probabilities +
+                     HIGH/LOW + overall level, timestamped and versioned.
+hotspot_clusters     Persistent-hotspot pipeline output: H3-r8 grouping,
+                     DBSCAN cluster label, fire-day count, contextual class.
+pipeline_job_runs    One row per pipeline stage run (ingest / aggregate /
+                     risk / hotspots) — /internal/health reports from here.
 """
 
 from __future__ import annotations
@@ -25,6 +39,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    SmallInteger,
     String,
     Text,
     UniqueConstraint,
@@ -37,6 +52,8 @@ from app.feature_schema import (
     CLASSIFIER_FEATURES,
     CLASSIFIER_MODEL_VERSION,
     DATASET_VERSION,
+    RISK_FEATURES,
+    RISK_MODEL_VERSION,
     SCHEMA_VERSION,
 )
 
@@ -207,3 +224,157 @@ class LiveDetection(Base):
 # (Phase 2A: the old 36-feature GBM schema was replaced by the 43-feature
 # classifier; risk-model sequences are a separate schema — see feature_schema.)
 FEATURE_NAMES_REF = list(CLASSIFIER_FEATURES)
+
+
+class FirmsDailyH3(Base):
+    """One row per (H3-r7 cell, day) with the 17 GRU features, frozen order.
+
+    feature_vector is a JSONB *list* of 17 floats in exactly RISK_FEATURES
+    order — the pipelines scale and stack it directly into (30, 17) windows.
+    fire_count is ALSO a real column so eligibility queries ("any fire in the
+    last 30 days?") and freshness queries can use an index instead of a
+    full-table scan over JSONB.
+    """
+
+    __tablename__ = "firms_daily_h3"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    h3_cell: Mapped[str] = mapped_column(String(32), nullable=False)
+    day: Mapped[date] = mapped_column(Date, nullable=False)
+
+    feature_vector: Mapped[list] = mapped_column(JSONVariant, nullable=False)
+    fire_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # Aggregation provenance: which detection rows contributed, any fill that
+    # was applied (weather forward-fill etc.), and the raw per-feature values
+    # pre-fill for auditing.
+    contributing_detections: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    fill_applied: Mapped[dict] = mapped_column(JSONVariant, nullable=False, default=dict)
+
+    ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("h3_cell", "day", name="uq_firms_daily_h3_cell_day"),
+        Index("ix_firms_daily_h3_cell_day", "h3_cell", "day"),
+        Index("ix_firms_daily_h3_day", "day"),
+    )
+
+
+class WeatherDaily(Base):
+    """Raw per-cell per-day weather from Open-Meteo (pre-fill)."""
+
+    __tablename__ = "weather_daily"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    h3_cell: Mapped[str] = mapped_column(String(32), nullable=False)
+    day: Mapped[date] = mapped_column(Date, nullable=False)
+
+    temperature_2m_mean: Mapped[float | None] = mapped_column(Float, nullable=True)
+    temperature_2m_max: Mapped[float | None] = mapped_column(Float, nullable=True)
+    temperature_2m_min: Mapped[float | None] = mapped_column(Float, nullable=True)
+    wind_speed_10m_max: Mapped[float | None] = mapped_column(Float, nullable=True)
+    wind_speed_10m_mean: Mapped[float | None] = mapped_column(Float, nullable=True)
+    dew_point_2m_mean: Mapped[float | None] = mapped_column(Float, nullable=True)
+    relative_humidity_mean: Mapped[float | None] = mapped_column(Float, nullable=True)
+    relative_humidity_min: Mapped[float | None] = mapped_column(Float, nullable=True)
+    precipitation_sum: Mapped[float | None] = mapped_column(Float, nullable=True)
+    shortwave_radiation_sum: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # Open-Meteo free archive has no daily RH/SSRD; those two may stay NULL.
+    observations: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("h3_cell", "day", name="uq_weather_daily_cell_day"),
+        Index("ix_weather_daily_cell_day", "h3_cell", "day"),
+    )
+
+
+class RiskPrediction(Base):
+    """Latest stored GRU risk output per (cell, horizon).
+
+    Upserted by the risk pipeline; read by /internal/risk* endpoints. One row
+    per cell per horizon (not one row with three blobs) so per-horizon history
+    queries stay cheap.
+    """
+
+    __tablename__ = "risk_predictions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    h3_cell: Mapped[str] = mapped_column(String(32), nullable=False)
+    horizon: Mapped[str] = mapped_column(String(8), nullable=False)  # 1day|3day|7day
+
+    probability: Mapped[float] = mapped_column(Float, nullable=False)
+    level: Mapped[str] = mapped_column(String(8), nullable=False)  # HIGH|LOW
+    overall: Mapped[str] = mapped_column(String(8), nullable=False)  # HIGH|MODERATE|LOW
+
+    model_version: Mapped[str] = mapped_column(String(32), nullable=False, default=RISK_MODEL_VERSION)
+    feature_schema_version: Mapped[str] = mapped_column(String(32), nullable=False, default=SCHEMA_VERSION)
+    data_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    predicted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("h3_cell", "horizon", name="uq_risk_predictions_cell_horizon"),
+        Index("ix_risk_predictions_cell", "h3_cell"),
+        Index("ix_risk_predictions_overall", "overall"),
+    )
+
+
+class HotspotCluster(Base):
+    """Persistent-hotspot pipeline output (H3-8 index + DBSCAN cluster)."""
+
+    __tablename__ = "hotspot_clusters"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cluster_uid: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    h3_cell: Mapped[str] = mapped_column(String(32), nullable=False, index=True)  # H3-r8 of centroid
+
+    centroid_lat: Mapped[float] = mapped_column(Float, nullable=False)
+    centroid_lng: Mapped[float] = mapped_column(Float, nullable=False)
+
+    unique_fire_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    total_detections: Mapped[int] = mapped_column(Integer, nullable=False)
+    first_seen: Mapped[date] = mapped_column(Date, nullable=False)
+    last_seen: Mapped[date] = mapped_column(Date, nullable=False)
+    is_persistent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)  # >= 5 fire days
+
+    # Contextual classification (MLP) + provenance of the context features.
+    predicted_class: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    probabilities: Mapped[dict | None] = mapped_column(JSONVariant, nullable=True)
+    needs_review: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    feature_snapshot: Mapped[dict] = mapped_column(JSONVariant, nullable=False, default=dict)
+
+    model_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_hotspot_clusters_persistent", "is_persistent"),
+        Index("ix_hotspot_clusters_latlng", "centroid_lat", "centroid_lng"),
+    )
+
+
+class PipelineJobRun(Base):
+    """One row per pipeline stage run — powers /internal/health."""
+
+    __tablename__ = "pipeline_job_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    job_name: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    # running|success|failed
+    status: Mapped[str] = mapped_column(String(8), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rows_processed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("ix_pipeline_job_runs_name_started", "job_name", "started_at"),
+    )
+
+
+RISK_FEATURE_NAMES_REF = list(RISK_FEATURES)
