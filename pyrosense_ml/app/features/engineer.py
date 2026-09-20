@@ -105,9 +105,13 @@ async def engineer_features(
     else:
         out.provenance["osm"] = "cache" if osm.cached else "overpass"
         dist = {
-            k: v if v is not None else CLASSIFIER_TRAINING_MEDIANS[k]
+            _OSM_RENAME.get(k, k): v if v is not None else CLASSIFIER_TRAINING_MEDIANS[_OSM_RENAME.get(k, k)]
             for k, v in osm.distances.items()
         }
+        # The Overpass module may lag the frozen schema (or skip a category) —
+        # guarantee every schema key exists so the final guard never trips.
+        for k in OSM_FEATURES:
+            dist.setdefault(k, CLASSIFIER_TRAINING_MEDIANS[k])
     out.features.update(dist)
 
     # ── 3. Land cover ───────────────────────────────────────────────────────
@@ -117,7 +121,14 @@ async def engineer_features(
         out.provenance["land_cover"] = "median_fallback"
     else:
         out.provenance["land_cover"] = lc.provenance
-    out.features.update(_map_land_cover(lc.features))
+    lc_mapped = _map_land_cover(lc.features)
+    # The OSM-derived source has no snow/ice class (and a failed fetch has no
+    # rows at all) — guarantee every lc_* schema key exists. snow/ice falls
+    # back to the 0.0 training prior, which is also its real-world prior for
+    # the monitored regions (documented approximation).
+    for k in LC_SCHEMA_FEATURES:
+        lc_mapped.setdefault(k, CLASSIFIER_TRAINING_MEDIANS[k])
+    out.features.update(lc_mapped)
 
     # ── 4. Weather ──────────────────────────────────────────────────────────
     wx = await get_weather(latitude, longitude)
@@ -170,6 +181,12 @@ OSM_FEATURES = [
     "distance_to_transport_km",
     "distance_to_agriculture_km",
 ]
+# The Overpass module's fuel category is named after the OLD GBM schema
+# (distance_to_fuel_storage_km); the frozen classifier schema wants
+# distance_to_fuel_km. Renamed here so the vector matches the schema exactly.
+_OSM_RENAME = {"distance_to_fuel_storage_km": "distance_to_fuel_km"}
+# lc_* keys in the frozen schema (incl. lc_snow_and_ice_ratio).
+LC_SCHEMA_FEATURES = [n for n in CLASSIFIER_FEATURES if n.startswith("lc_")]
 CLASSIFIER_WEATHER_FEATURES = [
     "mean_temperature_c",
     "max_temperature_c",
@@ -182,6 +199,7 @@ CLASSIFIER_WEATHER_FEATURES = [
     "mean_precipitation",
     "mean_ssrd",
     "max_ssrd",
+    "weather_observation_count",
 ]
 
 # Open-Meteo archive provides daily temperature/wind/dewpoint/precipitation
@@ -196,6 +214,7 @@ _WEATHER_RENAME = {
     "max_wind_speed": "max_wind_speed_ms",
     "total_precipitation": "total_precipitation",
     "mean_precipitation": "mean_precipitation",
+    "weather_observations": "weather_observation_count",
 }
 
 

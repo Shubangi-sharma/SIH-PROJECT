@@ -1,8 +1,11 @@
 # Hotspot Classification — Model Card
 
 > **Recovery note:** this folder was restored in a Phase 1 recovery commit from the
-> Colab-export zips (`classification_model-20260919T081306Z-1-001.zip`), after the
-> original Phase 1 commit was found to be missing from the repository history.
+> Colab-export zip (`classification_model-20260919T081306Z-1-001.zip` — since
+> removed from the tree after byte-identical extraction was verified; recover
+> it via `git log --diff-filter=D -- '*001.zip'` + `git checkout <commit> --
+> <path>`), after the original Phase 1 commit was found to be missing from
+> the repository history.
 
 ## What this model does
 Takes a persistent FIRMS hotspot's surrounding OSM, land-cover, and weather context

@@ -383,6 +383,7 @@ export default function MapPage() {
           selection={drawerSelection}
           viewportHotspots={filteredHotspots}
           viewportAnalyses={filteredAnalyses}
+          viewportBbox={debouncedViewport}
         />
       </div>
     </div>

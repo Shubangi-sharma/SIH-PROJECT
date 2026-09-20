@@ -2,7 +2,9 @@
 
 > **Recovery note:** this folder was restored in a Phase 1 recovery commit from the
 > Colab-export zips (`models-20260919T081115Z-1-001.zip`,
-> `preprocessed-20260919T081215Z-1-001.zip`), after the original Phase 1 commit was
+> `preprocessed-20260919T081215Z-1-001.zip` — removed from the tree; still
+> recoverable via `git log --diff-filter=D -- '*001.zip'` + `git checkout
+> <commit> -- <path>`), after the original Phase 1 commit was
 > found to be missing from the repository history.
 
 ## What this model does

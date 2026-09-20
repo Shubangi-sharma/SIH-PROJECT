@@ -157,6 +157,11 @@ async def predict_endpoint(
         "classifier_model_used": result.classifier_model_used,
         "risk": None,
         "risk_unavailable": RISK_NOT_IMPLEMENTED_DETAIL,
+        # Contract-compat fields for the frontend's PredictionResponseDto:
+        # explicit null / empty rather than absent keys, so no client can
+        # mistake their absence for a bug (risk stays un-faked until Phase 2C).
+        "risk_score": None,
+        "top_contributing_features": [],
         "explanation": explanation,
         "explanation_provenance": explanation_provenance,
         "source": "live",

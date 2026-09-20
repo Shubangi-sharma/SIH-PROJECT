@@ -191,6 +191,20 @@ async def get_explanation(
         source=source,
     )
     explanation, model_name, grounded = await _generate(facts)
+    if not explanation:
+        # Every provider failed (or produced only ungrounded/no content) —
+        # fall back to the deterministic template. NEVER cache or return an
+        # empty explanation: a cached "" would poison every future identical
+        # request (provenance "cache" replaying nothing, forever).
+        explanation = template_explanation(
+            predicted_class=predicted_class,
+            risk_score=risk_score,
+            confidence=confidence,
+            top_features=top_features,
+            source=source,
+        )
+        await _store(session, fhash, prediction_id, "template", "", False, explanation)
+        return explanation, "template"
     await _store(session, fhash, prediction_id, "openrouter", model_name, grounded, explanation)
     return explanation, "openrouter" if grounded else "template"
 

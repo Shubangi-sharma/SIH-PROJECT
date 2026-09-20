@@ -16,7 +16,7 @@
  * They are never mixed in one chart.
  */
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -44,6 +44,11 @@ import {
   MODEL_CLASS_COLORS,
   MODEL_CLASS_LABELS,
 } from "@/lib/mlApi";
+import {
+  fetchHotspotClusters,
+  type HotspotClustersResponse,
+} from "@/lib/opsApi";
+import { HOTSPOT_CLASS_LABELS } from "@/lib/riskApi";
 import { frpColor } from "@/lib/firms";
 
 const AXIS = { fill: "#78808C", fontSize: 11 } as const;
@@ -187,6 +192,49 @@ export default function AnalyticsPage() {
   );
 
   const anyMlData = mlHotspots.length > 0;
+
+  /* ── 7. Hotspot clusters (ML pipeline, /api/v1/hotspots) ───────────────── */
+  const [clusters, setClusters] = useState<HotspotClustersResponse | null>(null);
+  const [clustersError, setClustersError] = useState<string | null>(null);
+  const [clustersLoading, setClustersLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setClustersLoading(true);
+    setClustersError(null);
+    fetchHotspotClusters({
+      minLat: INDIA_BBOX.south,
+      maxLat: INDIA_BBOX.north,
+      minLng: INDIA_BBOX.west,
+      maxLng: INDIA_BBOX.east,
+      limit: 2000,
+    })
+      .then((r) => {
+        if (!cancelled) setClusters(r);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setClustersError(err instanceof Error ? err.message : "unavailable");
+      })
+      .finally(() => {
+        if (!cancelled) setClustersLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const clusterList = useMemo(() => clusters?.hotspots ?? [], [clusters]);
+  const persistentCount = useMemo(() => clusterList.filter((h) => h.is_persistent).length, [clusterList]);
+  const needsReviewCount = useMemo(() => clusterList.filter((h) => h.needs_review).length, [clusterList]);
+  const clustersByClass = useMemo(
+    () =>
+      (clusters?.classes ?? []).map((cls) => ({
+        name: HOTSPOT_CLASS_LABELS[cls] ?? cls,
+        clusters: clusterList.filter((h) => h.class === cls).length,
+      })),
+    [clusters, clusterList],
+  );
+  const anyClusterData = clusterList.length > 0;
 
   return (
     <div className="pyro-scroll h-full overflow-y-auto">
@@ -363,6 +411,58 @@ export default function AnalyticsPage() {
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
+          </ChartCard>
+          <ChartCard
+            title="Hotspot clusters (ML pipeline)"
+            note="Aggregated H3-res-7 clusters with the pipeline's contextual class — context-derived, never an ignition cause."
+            loading={clustersLoading && !anyClusterData}
+            empty={!clustersLoading && !anyClusterData && !clustersError}
+          >
+            {clustersError ? (
+              <p className="flex h-full items-center justify-center px-6 text-center text-xs text-text-tertiary">
+                Cluster catalogue unavailable ({clustersError}). Run the ML pipeline (Settings → System status) to populate it.
+              </p>
+            ) : (
+              <>
+                <div className="mb-3 grid grid-cols-3 gap-2">
+                  <div className="rounded-lg bg-bg-raised px-3 py-2">
+                    <div className="font-mono text-lg font-semibold text-text-primary">{clusterList.length}</div>
+                    <div className="text-[10px] uppercase tracking-wider text-text-tertiary">clusters</div>
+                  </div>
+                  <div className="rounded-lg bg-bg-raised px-3 py-2">
+                    <div className="font-mono text-lg font-semibold text-text-primary">{persistentCount}</div>
+                    <div className="text-[10px] uppercase tracking-wider text-text-tertiary">persistent</div>
+                  </div>
+                  <div className="rounded-lg bg-bg-raised px-3 py-2">
+                    <div className="font-mono text-lg font-semibold text-text-primary">{needsReviewCount}</div>
+                    <div className="text-[10px] uppercase tracking-wider text-text-tertiary">needs review</div>
+                  </div>
+                </div>
+                {anyClusterData && (
+                  <ResponsiveContainer width="100%" height={180}>
+                    <BarChart data={clustersByClass} layout="vertical" margin={{ top: 0, right: 16, bottom: 0, left: 8 }}>
+                      <CartesianGrid stroke={GRID} strokeDasharray="3 3" horizontal={false} />
+                      <XAxis type="number" tick={AXIS} axisLine={{ stroke: GRID }} tickLine={false} allowDecimals={false} />
+                      <YAxis
+                        type="category"
+                        dataKey="name"
+                        tick={{ ...AXIS, fontSize: 10 }}
+                        axisLine={false}
+                        tickLine={false}
+                        width={170}
+                      />
+                      <ReTooltip contentStyle={tooltipStyle} cursor={{ fill: "#151A20" }} />
+                      <Bar dataKey="clusters" fill="#6E93BE" radius={[0, 3, 3, 0]} maxBarSize={16} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+                {clusters?.meta.stale && (
+                  <p className="mt-2 text-[10px] text-status-watch">
+                    Showing stale cached clusters — ML service unreachable.
+                  </p>
+                )}
+              </>
+            )}
           </ChartCard>
         </div>
       </div>

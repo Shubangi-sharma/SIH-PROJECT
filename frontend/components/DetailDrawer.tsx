@@ -15,6 +15,12 @@ import { FirmsHotspotDetail } from "./MapMarkerTooltips";
 import FreshnessBadge from "./FreshnessBadge";
 import { frpBandIndex } from "./MapCanvas";
 import { FRP_BANDS, type FirmsHotspot } from "@/lib/firms";
+import {
+  fetchViewportRisk,
+  ViewportRiskError,
+  type ViewportRiskResponse,
+} from "@/lib/opsApi";
+import { HORIZON_LABELS, RISK_LEVEL_COLORS, RISK_LEVEL_LABELS, type RiskHorizon } from "@/lib/riskApi";
 import type { Detection, FacilityAnalysis, FacilityNarrative, RiskStatus } from "@/lib/types";
 import { STATUS_META, STATUS_ORDER, statusColorHex } from "@/lib/types";
 import { haversineKm } from "@/lib/geo";
@@ -73,12 +79,135 @@ export type DetailDrawerSelection =
 /* empty state — live viewport summary                                 */
 /* ------------------------------------------------------------------ */
 
+/**
+ * A BBox as the lib/regions type (west/south/east/north degrees).
+ */
+export interface DrawerBBox {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+}
+
+/**
+ * Viewport GRU risk signals (GET /api/v1/risk) — the batch counterpart of
+ * the per-cell CellPanel. Only meaningful for zoomed-in viewports: the BFF
+ * fills the bbox with H3 res-7 cells and refuses anything above 5000 cells
+ * (413), which this section renders as an honest "zoom in" state instead of
+ * pretending the data exists. `meta.stale` (ML down, cache served) is shown.
+ */
+function ViewportRiskSection({ bbox }: { bbox: DrawerBBox }) {
+  const [data, setData] = React.useState<ViewportRiskResponse | null>(null);
+  const [tooLarge, setTooLarge] = React.useState(false);
+  const [unavailable, setUnavailable] = React.useState(false);
+  const [loading, setLoading] = React.useState(false);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setData(null);
+    setTooLarge(false);
+    setUnavailable(false);
+    setLoading(true);
+    fetchViewportRisk({
+      minLat: bbox.south,
+      maxLat: bbox.north,
+      minLng: bbox.west,
+      maxLng: bbox.east,
+    })
+      .then((r) => {
+        if (!cancelled) setData(r);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        if (err instanceof ViewportRiskError && err.status === 413) setTooLarge(true);
+        else setUnavailable(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [bbox.west, bbox.south, bbox.east, bbox.north]);
+
+  const levelCounts = React.useMemo(() => {
+    const counts: Record<string, number> = { HIGH: 0, MODERATE: 0, LOW: 0 };
+    if (data) for (const entry of Object.values(data.risks)) counts[entry.overall] = (counts[entry.overall] ?? 0) + 1;
+    return counts;
+  }, [data]);
+
+  /** The furthest-out horizon that actually carries a threshold signal. */
+  const headlineHorizon: RiskHorizon = "7day";
+
+  return (
+    <section className="rounded-xl bg-bg-surface p-4">
+      <div className="flex items-baseline gap-2">
+        <h3 className="font-display text-sm font-semibold text-text-primary">
+          GRU risk signals
+        </h3>
+        <span className="text-[10px] text-text-tertiary">· this view</span>
+        {data?.meta.stale && (
+          <span className="ml-auto rounded-full bg-bg-raised px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider text-status-watch">
+            stale
+          </span>
+        )}
+      </div>
+      <p className="mt-1 text-[10px] leading-snug text-text-tertiary">
+        {HORIZON_LABELS[headlineHorizon]} horizon · threshold signals, not
+        probabilities
+      </p>
+      {loading ? (
+        <p className="mt-3 text-xs text-text-tertiary">Checking stored predictions…</p>
+      ) : tooLarge ? (
+        <p className="mt-3 text-xs text-text-tertiary">
+          Zoom in — risk signals are computed per ~9 km² H3 cell, so very large
+          views are not scored.
+        </p>
+      ) : unavailable ? (
+        <p className="mt-3 text-xs text-text-tertiary">
+          Risk signals unavailable (ML service unreachable and no cached data
+          for this area).
+        </p>
+      ) : data && Object.keys(data.risks).length === 0 ? (
+        <p className="mt-3 text-xs text-text-tertiary">
+          No stored predictions for this view yet — run the ML pipeline (Settings → System status) to generate them.
+        </p>
+      ) : data ? (
+        <>
+          <div className="mt-3 grid gap-1.5">
+            {(Object.keys(levelCounts) as (keyof typeof levelCounts)[]).map((level) => (
+              <span key={level} className="flex items-center gap-2">
+                <span
+                  className="inline-block h-2 w-2 flex-shrink-0 rounded-full"
+                  style={{ backgroundColor: RISK_LEVEL_COLORS[level] ?? "#78808C" }}
+                />
+                <span className="text-[11px] text-text-secondary">
+                  {RISK_LEVEL_LABELS[level] ?? level}
+                </span>
+                <span className="ml-auto font-mono text-[11px] text-text-primary">
+                  {levelCounts[level]}
+                </span>
+              </span>
+            ))}
+          </div>
+          <p className="mt-2.5 text-[10px] leading-snug text-text-tertiary">
+            {Object.keys(data.risks).length} scored cells · {data.missing.length} without stored history
+            {data.meta.cached ? " · cached" : ""} — click a cell on the map for horizons 1/3/7.
+          </p>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
 function EmptySummary({
   hotspots,
   analyses,
+  viewportBbox,
 }: {
   hotspots: FirmsHotspot[];
   analyses: FacilityAnalysis[];
+  viewportBbox: DrawerBBox | null;
 }) {
   /** Real FRP-band classification — the same one the markers/legend use. */
   const bandCounts = React.useMemo(() => {
@@ -171,6 +300,8 @@ function EmptySummary({
         </div>
       </section>
 
+      {viewportBbox && <ViewportRiskSection bbox={viewportBbox} />}
+
       <section className="rounded-xl bg-bg-surface p-4">
         <h3 className="font-display text-sm font-semibold text-text-primary">
           Facilities by risk status
@@ -219,6 +350,7 @@ export default function DetailDrawer({
   selection,
   viewportHotspots,
   viewportAnalyses,
+  viewportBbox = null,
 }: {
   collapsed: boolean;
   onToggleCollapsed: () => void;
@@ -227,6 +359,8 @@ export default function DetailDrawer({
   viewportHotspots: FirmsHotspot[];
   /** classified facilities currently shown on the map */
   viewportAnalyses: FacilityAnalysis[];
+  /** live map viewport (debounced) for the batch risk-signal section */
+  viewportBbox?: DrawerBBox | null;
 }) {
   return (
     <aside
@@ -270,7 +404,11 @@ export default function DetailDrawer({
           {/* 1. nothing selected → live viewport summary */}
           {selection.kind === "empty" && (
             <div className="pyro-scroll min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
-              <EmptySummary hotspots={viewportHotspots} analyses={viewportAnalyses} />
+              <EmptySummary
+                hotspots={viewportHotspots}
+                analyses={viewportAnalyses}
+                viewportBbox={viewportBbox}
+              />
             </div>
           )}
 

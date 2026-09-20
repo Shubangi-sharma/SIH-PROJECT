@@ -355,7 +355,7 @@ export default function PredictPage() {
             Submit a hotspot&apos;s location and the ML service engineers all 36
             model features — detection persistence, FRP statistics, distances to
             infrastructure, land cover, weather — then classifies it into one of
-            four categories with a grounded explanation. Feature engineering and
+            five categories with a grounded explanation. Feature engineering and
             preprocessing happen entirely server-side.
           </p>
         </header>
@@ -547,22 +547,38 @@ export default function PredictPage() {
                         </span>
                       </div>
                       <div className="flex flex-col items-center">
-                        <span
-                          className="font-display text-3xl font-semibold"
-                          style={{
-                            color:
-                              result.risk_score >= 66
-                                ? "#C26A6A"
-                                : result.risk_score >= 33
-                                  ? "#B99B5E"
-                                  : "#5FA97C",
-                          }}
-                        >
-                          {result.risk_score.toFixed(1)}
-                        </span>
-                        <span className="mt-1 text-[10px] uppercase tracking-wider text-text-tertiary">
-                          Model risk score
-                        </span>
+                        {result.risk_score == null ? (
+                          <>
+                            <span className="font-display text-3xl font-semibold text-text-tertiary">
+                              —
+                            </span>
+                            <span className="mt-1 text-[10px] uppercase tracking-wider text-text-tertiary">
+                              Model risk score
+                            </span>
+                            <span className="mt-0.5 text-[9px] leading-tight text-text-tertiary">
+                              GRU signals pending
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <span
+                              className="font-display text-3xl font-semibold"
+                              style={{
+                                color:
+                                  result.risk_score >= 66
+                                    ? "#C26A6A"
+                                    : result.risk_score >= 33
+                                      ? "#B99B5E"
+                                      : "#5FA97C",
+                              }}
+                            >
+                              {result.risk_score.toFixed(1)}
+                            </span>
+                            <span className="mt-1 text-[10px] uppercase tracking-wider text-text-tertiary">
+                              Model risk score
+                            </span>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
