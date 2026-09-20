@@ -55,7 +55,7 @@ import { FacilityAnalysis, RiskStatus, statusColorHex } from "@/lib/types";
 import { FirmsHotspot, frpColor, frpRadius } from "@/lib/firms";
 import { FacilityTooltipContent, FirmsTooltipContent } from "./MapMarkerTooltips";
 import { useSupercluster, ClusterPoint } from "@/lib/useSupercluster";
-import h3Js from "h3-js";
+import { latLngToCell } from "h3-js";
 import clsx from "clsx";
 
 export type Basemap = "dark" | "streets" | "satellite";
@@ -123,10 +123,7 @@ function ClickCatcher({ onCellClick }: { onCellClick: (h3Cell: string | null) =>
   useMapEvents({
     click(e) {
       try {
-        // h3-js is CJS; the default interop shape differs between the Next
-        // server bundle (module.exports.default) and the client bundle.
-        const h3 = ((h3Js as unknown as { default?: typeof h3Js }).default ?? h3Js) as typeof h3Js;
-        onCellClick(h3.latLngToCell(e.latlng.lat, e.latlng.lng, 7));
+        onCellClick(latLngToCell(e.latlng.lat, e.latlng.lng, 7));
       } catch {
         onCellClick(null); // a broken geo lib must not crash the map
       }
