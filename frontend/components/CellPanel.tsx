@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { X, AlertTriangle, Eye } from "lucide-react";
+import React, { useCallback, useEffect, useState } from "react";
+import { X, AlertTriangle, Eye, RefreshCw } from "lucide-react";
 import clsx from "clsx";
 import {
   fetchCellDetail,
@@ -27,6 +27,19 @@ import FreshnessBadge from "./FreshnessBadge";
  */
 
 const HORIZON_ORDER: RiskHorizon[] = ["1day", "3day", "7day"];
+
+function RetryButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="mt-2.5 inline-flex items-center gap-1.5 rounded-md border border-border-hairline bg-bg-raised px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-wider text-text-secondary transition-colors duration-150 hover:border-border-strong hover:text-text-primary"
+    >
+      <RefreshCw size={11} />
+      Retry
+    </button>
+  );
+}
 
 function RiskCard({
   horizon,
@@ -120,6 +133,9 @@ export default function CellPanel({
   const [data, setData] = useState<CellDetailResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  /** Bumped by Retry — re-runs the fetch for the same cell. */
+  const [refreshKey, setRefreshKey] = useState(0);
+  const retry = useCallback(() => setRefreshKey((k) => k + 1), []);
 
   useEffect(() => {
     setData(null);
@@ -139,7 +155,7 @@ export default function CellPanel({
     return () => {
       cancelled = true;
     };
-  }, [h3Cell]);
+  }, [h3Cell, refreshKey]);
 
   const risk = data?.risk;
   const riskOk = risk && risk.status === "ok" ? risk : null;
@@ -177,15 +193,24 @@ export default function CellPanel({
         )}
 
         {error && (
-          <p className="flex items-start gap-2 rounded-lg border border-border-strong bg-bg-void/90 px-3 py-2.5 text-xs text-status-watch">
-            <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
-            {error}
-          </p>
+          <div className="rounded-lg border border-border-strong bg-bg-void/90 px-3 py-2.5 text-xs text-status-watch">
+            <p className="flex items-start gap-2">
+              <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
+              {error}
+            </p>
+            <RetryButton onClick={retry} />
+          </div>
         )}
 
         {data && (
           <>
             <FreshnessBadge meta={data.meta} label="Risk as of" className="w-fit" />
+            {data.meta.stale && (
+              <p className="mt-1.5 text-[10px] leading-snug text-status-watch">
+                Last known good data — the ML service was unreachable when this
+                was fetched. Retry below once it is running.
+              </p>
+            )}
 
             {/* risk signals */}
             {riskOk && (
@@ -226,9 +251,20 @@ export default function CellPanel({
             )}
 
             {risk && risk.status === "unavailable" && (
-              <p className="rounded-lg border border-border-strong bg-bg-void/90 px-3 py-2.5 text-xs text-status-watch">
-                {risk.note ?? "Risk service unavailable — showing cached data when available."}
-              </p>
+              <div className="rounded-lg border border-border-strong bg-bg-void/90 px-3 py-3 text-xs">
+                <p className="flex items-center gap-2 font-medium text-status-watch">
+                  <AlertTriangle size={14} className="flex-shrink-0" />
+                  ML risk service unavailable
+                </p>
+                <p className="mt-1.5 leading-snug text-text-secondary">
+                  The 1/3/7-day risk signals come from the pyrosense_ml GRU
+                  models, which could not be reached.{" "}
+                  {risk.note ?? "No stored prediction exists for this cell yet."}{" "}
+                  Start the ML service and retry — this panel fills in from its
+                  response.
+                </p>
+                <RetryButton onClick={retry} />
+              </div>
             )}
 
             {/* clusters */}
@@ -239,7 +275,8 @@ export default function CellPanel({
               {data.hotspots.length === 0 ? (
                 <p className="mt-2 rounded-lg border border-border-hairline bg-bg-raised px-3 py-2.5 text-xs leading-snug text-text-secondary">
                   No persistent hotspot clusters recorded for this cell in the
-                  current pipeline window.
+                  current pipeline window. Clusters appear once the ML pipeline
+                  has processed enough detection history for this area.
                 </p>
               ) : (
                 <ul className="mt-3 space-y-2">

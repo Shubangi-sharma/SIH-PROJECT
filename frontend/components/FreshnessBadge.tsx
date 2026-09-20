@@ -51,13 +51,23 @@ export default function FreshnessBadge({
 
   const ts = new Date(meta.data_timestamp);
   const ageMs = meta.age_ms ?? (Number.isFinite(ts.getTime()) ? Date.now() - ts.getTime() : NaN);
-  const stale = Boolean(meta.stale || meta.cached);
+  /* stale ≠ cached: `stale` means the ML service was unreachable and last-known-good
+     data was served (warning); `cached` is a normal cache hit whose data is still
+     current (neutral). Conflating them showed "just now · stale" on healthy reads. */
+  const stale = Boolean(meta.stale);
+  const cached = !stale && Boolean(meta.cached);
   const ageText = Number.isFinite(ageMs) ? formatAge(ageMs) : null;
 
   return (
     <span
       role="status"
-      title={stale ? "Serving the last known good data — the ML service is unreachable" : undefined}
+      title={
+        stale
+          ? "Serving the last known good data — the ML service is unreachable"
+          : cached
+            ? "Served from cache — same data as the previous request"
+            : undefined
+      }
       className={clsx(
         "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 font-mono text-[10px]",
         stale
@@ -82,6 +92,7 @@ export default function FreshnessBadge({
         })}
       </span>
       {ageText && <span className="text-text-tertiary">· {ageText}</span>}
+      {cached && <span className="text-text-tertiary">· cached</span>}
       {stale && <span className="uppercase tracking-wider">· stale</span>}
     </span>
   );
