@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
+import { usePathname } from "next/navigation";
 import TopBar from "@/components/TopBar";
 import LeftNav from "@/components/LeftNav";
 import { useAnalyses } from "@/lib/hooks";
@@ -9,11 +10,13 @@ import { REGION_BBOXES } from "@/lib/regions";
 /**
  * Shared application shell: TopBar + collapsible LeftNav around every page.
  * Lives in the root layout so each route renders its own content only.
- * The critical-alert count comes from the backend's computed analyses —
- * the same shared SWR cache every page uses: one shared fetch, no
- * duplicated requests (§5).
+ *
+ * The landing page (`/`) renders WITHOUT the shell chrome — full-screen
+ * cinematic hero. Every other route gets the standard shell.
  */
 export default function Shell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+
   // Default collapsed = the 72px icon rail (spec §2)
   const [collapsed, setCollapsed] = useState(true);
 
@@ -23,6 +26,11 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     () => analyses.filter((a) => a.status === "critical").length,
     [analyses],
   );
+
+  // Landing page — no shell chrome
+  if (pathname === "/") {
+    return <>{children}</>;
+  }
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-bg-void">

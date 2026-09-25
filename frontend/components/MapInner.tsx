@@ -55,7 +55,6 @@ import { FacilityAnalysis, RiskStatus, statusColorHex } from "@/lib/types";
 import { FirmsHotspot, frpColor, frpRadius } from "@/lib/firms";
 import { FacilityTooltipContent, FirmsTooltipContent } from "./MapMarkerTooltips";
 import { useSupercluster, ClusterPoint } from "@/lib/useSupercluster";
-import { latLngToCell } from "h3-js";
 import clsx from "clsx";
 
 export type Basemap = "dark" | "streets" | "satellite";
@@ -82,6 +81,7 @@ export const BASEMAPS: {
     label: "Satellite",
     url: ESRI_IMAGERY_URL,
     attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
+    className: "map-tiles-satellite",
   },
 ];
 
@@ -113,19 +113,19 @@ function ViewportAnimator({ view }: { view: MapView }) {
 }
 
 /**
- * ClickCatcher — maps a background-map click to its H3-r7 cell.
+ * ClickCatcher — reports background-map clicks as plain coordinates.
  *
  * Leaflet fires at most ONE of {background click, marker/tooltip click} per
  * physical click, so facility/hotspot interactions never co-fire with this.
- * The parent decides what a cell click means (the §10 click panel).
+ * The parent decides what a click means (the area panel).
  */
-function ClickCatcher({ onCellClick }: { onCellClick: (h3Cell: string | null) => void }) {
+function ClickCatcher({ onAreaClick }: { onAreaClick: (point: { lat: number; lng: number }) => void }) {
   useMapEvents({
     click(e) {
       try {
-        onCellClick(latLngToCell(e.latlng.lat, e.latlng.lng, 7));
+        onAreaClick({ lat: e.latlng.lat, lng: e.latlng.lng });
       } catch {
-        onCellClick(null); // a broken geo lib must not crash the map
+        // a broken geo context must not crash the map
       }
     },
   });
@@ -405,7 +405,7 @@ export default function MapInner({
   onTilesLoading,
   onTilesLoaded,
   onViewport,
-  onCellClick,
+  onAreaClick,
 }: {
   view: MapView;
   analyses: FacilityAnalysis[];
@@ -420,8 +420,8 @@ export default function MapInner({
   onTilesLoaded: () => void;
   /** debounced upstream — fires when the user stops moving the map */
   onViewport: (b: [number, number, number, number]) => void;
-  /** background-map click → H3-r7 cell (the §10 click panel) */
-  onCellClick?: (h3Cell: string | null) => void;
+  /** background-map click → coordinates of the clicked point (AreaPanel) */
+  onAreaClick?: (point: { lat: number; lng: number }) => void;
 }) {
   // ── Teardown ownership ─────────────────────────────────────────────────
   // Deliberately NO manual `map.remove()` effect here. react-leaflet v4
@@ -447,7 +447,7 @@ export default function MapInner({
       <BaseLayer basemap={basemap} onLoading={onTilesLoading} onLoaded={onTilesLoaded} />
       <ViewportAnimator view={view} />
       <ViewportReporter onViewport={onViewport} />
-      <ClickCatcher onCellClick={onCellClick ?? (() => {})} />
+      <ClickCatcher onAreaClick={onAreaClick ?? (() => {})} />
       {showFirms && firmsHotspots.length > 0 && (
         <FirmsLayer hotspots={firmsHotspots} selectedHotspotKey={selectedHotspotKey} onSelectHotspot={onSelectHotspot} />
       )}

@@ -210,7 +210,7 @@ function ExplainabilityCard({
 }) {
   if (features.length === 0) {
     return (
-      <div className="rounded-xl bg-bg-surface p-5">
+      <div className="rounded-xl dash-card p-5">
         <h3 className="font-display text-sm font-semibold text-text-primary">
           Why this prediction
         </h3>
@@ -231,7 +231,7 @@ function ExplainabilityCard({
   const sum = withScore.reduce((a, f) => a + f.contribution, 0) || 1;
 
   return (
-    <div className="rounded-xl bg-bg-surface p-5">
+    <div className="rounded-xl dash-card p-5">
       <h3 className="font-display text-sm font-semibold text-text-primary">
         Why this prediction
       </h3>
@@ -365,9 +365,9 @@ export default function PredictPage() {
   }, []);
 
   return (
-    <div className="pyro-scroll h-full overflow-y-auto">
+    <div className="pyro-scroll h-full overflow-y-auto bg-gradient-mesh">
       <div className="mx-auto flex max-w-[1100px] flex-col gap-6 p-6 pb-20">
-        <header className="pt-4">
+        <header className="pt-4 dash-section" style={{ animationDelay: "0.05s" }}>
           <h1 className="font-display text-2xl font-semibold text-text-primary">
             Hotspot Classification
           </h1>
@@ -382,7 +382,7 @@ export default function PredictPage() {
 
         <div className="grid gap-6 lg:grid-cols-[420px_1fr]">
           {/* ── input form (PDF §6 recommended fields only) ─────────────── */}
-          <section className="rounded-xl bg-bg-surface p-5">
+          <section className="dash-card rounded-xl p-5 dash-section" style={{ animationDelay: "0.1s" }}>
             <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-text-secondary">
               Hotspot input
             </h2>
@@ -555,10 +555,10 @@ export default function PredictPage() {
                               —
                             </span>
                             <span className="mt-1 text-[10px] uppercase tracking-wider text-text-tertiary">
-                              Model risk score
+                              Risk score
                             </span>
                             <span className="mt-0.5 text-[9px] leading-tight text-text-tertiary">
-                              GRU signals pending
+                              legacy build — unavailable
                             </span>
                           </>
                         ) : (
@@ -568,16 +568,19 @@ export default function PredictPage() {
                               style={{
                                 color:
                                   result.risk_score >= 66
-                                    ? "#C26A6A"
+                                    ? "#E06060"
                                     : result.risk_score >= 33
-                                      ? "#B99B5E"
-                                      : "#5FA97C",
+                                      ? "#E0A84C"
+                                      : "#4ECBA0",
                               }}
                             >
                               {result.risk_score.toFixed(1)}
                             </span>
                             <span className="mt-1 text-[10px] uppercase tracking-wider text-text-tertiary">
-                              Model risk score
+                              Classification risk
+                            </span>
+                            <span className="mt-0.5 text-[9px] leading-tight text-text-tertiary">
+                              weighted-probability derived
                             </span>
                           </>
                         )}
@@ -608,7 +611,7 @@ export default function PredictPage() {
                 </div>
 
                 {/* explanation — near the category, not buried (P1) */}
-                <div className="rounded-xl bg-bg-surface p-5">
+                <div className="rounded-xl dash-card p-5">
                   <h3 className="flex items-center gap-2 font-display text-sm font-semibold text-text-primary">
                     Why this classification
                     <span
@@ -634,7 +637,7 @@ export default function PredictPage() {
                 <ExplainabilityCard features={result.top_contributing_features} />
 
                 {/* analyzed location + input summary + timestamp (§8) */}
-                <div className="rounded-xl bg-bg-surface p-5">
+                <div className="rounded-xl dash-card p-5">
                   <h3 className="flex items-center gap-1.5 font-display text-sm font-semibold text-text-primary">
                     <Satellite size={14} className="text-accent-secondary" />
                     Analysis record

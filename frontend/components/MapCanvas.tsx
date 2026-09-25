@@ -3,13 +3,8 @@
 import React, { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import {
-  Building2,
-  BookOpen,
-  Flame,
-  Satellite,
-  SlidersHorizontal,
-} from "lucide-react";
+import { BookOpen, Flame, SlidersHorizontal } from "lucide-react";
+import PyroLoader from "./PyroLoader";
 import {
   FacilityAnalysis,
   RiskStatus,
@@ -26,8 +21,8 @@ import clsx from "clsx";
 const MapInner = dynamic(() => import("./MapInner"), {
   ssr: false,
   loading: () => (
-    <div className="flex h-full w-full items-center justify-center bg-bg-base font-body text-xs text-text-tertiary">
-      Loading map…
+    <div className="flex h-full w-full items-center justify-center bg-bg-base">
+      <PyroLoader label="Rendering map" sub="Loading tiles and the live thermal layer" compact />
     </div>
   ),
 });
@@ -35,9 +30,11 @@ const MapInner = dynamic(() => import("./MapInner"), {
 export type MapMode = "india" | "global";
 /**
  * Every toggle here drives a real visible layer — §3 dead-UI audit removed
- * the old landcover/FRP-heatmap stubs, which had no data behind them.
+ * the old landcover/FRP-heatmap stubs, which had no data behind them. The
+ * facility-boundaries toggle is gone too: boundaries were never rendered,
+ * so the button lied.
  */
-export type LayerId = "firms" | "boundaries";
+export type LayerId = "firms";
 
 /** PDF §3 filter state — every control maps to a real field on the data. */
 export interface MapFilters {
@@ -57,7 +54,6 @@ export function frpBandIndex(frp: number): 0 | 1 | 2 {
 
 export const LAYERS: { id: LayerId; label: string; icon: React.ElementType }[] = [
   { id: "firms", label: "FIRMS live hotspots", icon: Flame },
-  { id: "boundaries", label: "Facility boundaries", icon: Building2 },
 ];
 
 const BASEMAP_PILL: { id: Basemap; label: string }[] = [
@@ -83,7 +79,7 @@ export default function MapCanvas({
   selectedHotspotKey = null,
   onSelectHotspot,
   onViewport,
-  onCellClick,
+  onAreaClick,
   filters = DEFAULT_FILTERS,
   onFiltersChange,
   children,
@@ -108,8 +104,8 @@ export default function MapCanvas({
   onSelectHotspot?: (key: string | null) => void;
   /** debounced upstream — fires when the user stops moving the map */
   onViewport: (b: [number, number, number, number]) => void;
-  /** background-map click → H3-r7 cell (CellPanel); null-safe */
-  onCellClick?: (h3Cell: string | null) => void;
+  /** background-map click → coordinates of the clicked point (AreaPanel) */
+  onAreaClick?: (point: { lat: number; lng: number }) => void;
   /** PDF §3 filters — applied by the parent to the data it passes down */
   filters?: MapFilters;
   onFiltersChange?: (f: MapFilters) => void;
@@ -151,78 +147,106 @@ export default function MapCanvas({
           onTilesLoading={() => setTilesLoadingInternal(true)}
           onTilesLoaded={() => setTilesLoadingInternal(false)}
           onViewport={onViewport}
-          onCellClick={onCellClick}
+          onAreaClick={onAreaClick}
         />
       </MapErrorBoundary>
 
       {showSkeleton && (
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-0 animate-pulse bg-bg-surface/45"
+          className="pointer-events-none absolute inset-0 animate-pulse bg-bg-surface/40"
         />
       )}
 
       {/* Global Live badge — top-left, global mode only. Live data, not a
           simulation: no violet SIMULATION MODE treatment anymore (§4). */}
       {mode === "global" && (
-        <div
-          className={clsx(
-            "absolute left-4 top-4 z-[1000] rounded-md border px-2 py-1 font-mono text-xs uppercase tracking-wide shadow-lg shadow-black/40",
-            satellite
-              ? "border-border-strong bg-bg-void/90 text-accent-secondary"
-              : "border-border-hairline bg-bg-raised text-accent-secondary",
-          )}
-        >
+        <div className="map-glass absolute left-4 top-4 z-[1000] rounded-lg px-2.5 py-1 font-mono text-xs uppercase tracking-wide text-accent-secondary">
           Global Live
         </div>
       )}
 
-      {/* region mode pill — top-right (filters toggle alongside, §3) */}
-      <div className="absolute right-4 top-4 z-[1000] flex items-center gap-2">
-        {/* filters toggle (§3) — visible in India mode where state filter applies */}
-        <button
-          type="button"
-          onClick={() => setFiltersOpen((o) => !o)}
-          aria-expanded={filtersOpen}
-          aria-label="Map filters"
-          title="Filters"
-          className={clsx(
-            "flex h-9 w-9 items-center justify-center rounded-full border shadow-lg shadow-black/40 transition-colors duration-150",
-            filtersOpen || filters.state || filters.riskStatuses.length > 0 || filters.frpBand != null
-              ? "border-accent-primary/50 bg-accent-primary/15 text-accent-primary"
-              : satellite
-                ? "border-border-strong bg-bg-void/90 text-text-secondary hover:text-text-primary"
-                : "border-border-hairline bg-bg-raised text-text-secondary hover:text-text-primary",
-          )}
-        >
-          <SlidersHorizontal size={15} />
-        </button>
-        <div
-          className={clsx(
-            "flex rounded-full border p-1 shadow-lg shadow-black/40",
-            satellite
-              ? "border-border-strong bg-bg-void/90"
-              : "border-border-hairline bg-bg-raised",
-          )}
-        >
-          {(
-            [
-              { id: "india", label: "India" },
-              { id: "global", label: "Global Live" },
-            ] as const
-          ).map((m) => (
+      {/* ── top-right control stack ──────────────────────────────────── */}
+      <div className="absolute right-4 top-4 z-[1000] flex flex-col items-end gap-2">
+        {/* row 1: filters + region mode */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setFiltersOpen((o) => !o)}
+            aria-expanded={filtersOpen}
+            aria-label="Map filters"
+            title="Filters"
+            className={clsx(
+              "map-glass flex h-9 w-9 items-center justify-center rounded-full transition-colors duration-150",
+              filtersOpen || filters.state || filters.riskStatuses.length > 0 || filters.frpBand != null
+                ? "text-accent-primary ring-1 ring-accent-primary/50"
+                : "text-text-secondary hover:text-text-primary",
+            )}
+          >
+            <SlidersHorizontal size={15} />
+          </button>
+          <div className="map-glass flex rounded-full p-1" role="group" aria-label="Region">
+            {(
+              [
+                { id: "india", label: "India" },
+                { id: "global", label: "Global Live" },
+              ] as const
+            ).map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => onModeChange(m.id)}
+                className={clsx(
+                  "rounded-full px-4 py-1.5 font-body text-xs font-medium transition-colors duration-150",
+                  mode === m.id
+                    ? "bg-accent-primary/20 text-accent-primary ring-1 ring-accent-primary/40"
+                    : "text-text-secondary hover:text-text-primary",
+                )}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* row 2: basemap pill */}
+        <div className="map-glass flex rounded-full p-1" role="group" aria-label="Basemap">
+          {BASEMAP_PILL.map((b) => (
             <button
-              key={m.id}
+              key={b.id}
               type="button"
-              onClick={() => onModeChange(m.id)}
+              onClick={() => onBasemapChange?.(b.id)}
+              aria-pressed={basemap === b.id}
               className={clsx(
-                "rounded-full px-4 py-1.5 font-body text-xs font-medium transition-colors duration-150",
-                mode === m.id
-                  ? "border border-accent-primary bg-accent-primary/15 text-accent-primary"
-                  : "border border-transparent text-text-secondary hover:text-text-primary",
+                "rounded-full px-3.5 py-1.5 font-body text-[11px] font-medium transition-colors duration-150",
+                basemap === b.id
+                  ? "bg-accent-primary/20 text-accent-primary ring-1 ring-accent-primary/40"
+                  : "text-text-secondary hover:text-text-primary",
               )}
             >
-              {m.label}
+              {b.label}
+            </button>
+          ))}
+        </div>
+
+        {/* row 3: layer toggles (FIRMS only — boundaries removed) */}
+        <div className="flex flex-col gap-2">
+          {LAYERS.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              title={label}
+              aria-label={label}
+              aria-pressed={layers[id]}
+              onClick={() => onToggleLayer(id)}
+              className={clsx(
+                "map-glass flex h-9 w-9 items-center justify-center rounded-full transition-colors duration-150",
+                layers[id]
+                  ? "text-accent-primary ring-1 ring-accent-primary/40"
+                  : "text-text-secondary hover:text-text-primary",
+              )}
+            >
+              <Icon size={15} />
             </button>
           ))}
         </div>
@@ -231,14 +255,7 @@ export default function MapCanvas({
       {/* filter panel (§3: region handled by mode pill; date by timeline;
           persistence/FRP/state/status here) */}
       {filtersOpen && (
-        <div
-          className={clsx(
-            "absolute right-4 top-[52px] z-[1100] w-[248px] rounded-xl border p-4 shadow-lg shadow-black/50",
-            satellite
-              ? "border-border-strong bg-bg-void/95"
-              : "border-border-hairline bg-bg-raised/95",
-          )}
-        >
+        <div className="map-glass absolute right-4 top-[128px] z-[1100] w-[248px] rounded-xl p-4">
           <div className="flex items-center justify-between">
             <span className="font-body text-[10px] font-semibold uppercase tracking-widest text-text-tertiary">
               Filters
@@ -318,7 +335,7 @@ export default function MapCanvas({
                   className={clsx(
                     "flex-1 rounded-md px-1.5 py-1 font-mono text-[10px] transition-colors duration-150",
                     filters.frpBand === band
-                      ? "bg-accent-primary/15 text-accent-primary"
+                      ? "bg-accent-primary/20 text-accent-primary ring-1 ring-accent-primary/40"
                       : "text-text-tertiary hover:text-text-secondary",
                   )}
                   style={filters.frpBand === band ? undefined : { border: "1px solid #1A2028" }}
@@ -331,69 +348,11 @@ export default function MapCanvas({
         </div>
       )}
 
-      {/* right control stack: basemap pill + layer toggles */}
-      <div className="absolute right-4 top-[76px] z-[1000] flex flex-col items-end gap-2">
-        <div
-          className={clsx(
-            "flex rounded-full border p-1 shadow-lg shadow-black/40",
-            satellite
-              ? "border-border-strong bg-bg-void/90"
-              : "border-border-hairline bg-bg-raised",
-          )}
-          role="group"
-          aria-label="Basemap"
-        >
-          {BASEMAP_PILL.map((b) => (
-            <button
-              key={b.id}
-              type="button"
-              onClick={() => onBasemapChange?.(b.id)}
-              aria-pressed={basemap === b.id}
-              className={clsx(
-                "rounded-full px-3 py-1 font-body text-[11px] font-medium transition-colors duration-150",
-                basemap === b.id
-                  ? "bg-accent-primary/15 text-accent-primary"
-                  : "text-text-secondary hover:text-text-primary",
-              )}
-            >
-              {b.label}
-            </button>
-          ))}
-        </div>
+      {/* ── bottom-left: FIRMS feed status (always honest) ───────────── */}
+      {children}
 
-        <div className="flex flex-col gap-2">
-          {LAYERS.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              type="button"
-              title={label}
-              aria-label={label}
-              aria-pressed={layers[id]}
-              onClick={() => onToggleLayer(id)}
-              className={clsx(
-                "flex h-8 w-8 items-center justify-center rounded-lg border shadow-lg shadow-black/40 transition-colors duration-150",
-                layers[id]
-                  ? "border-transparent bg-accent-primary/15 text-accent-primary"
-                  : satellite
-                    ? "border-border-strong bg-bg-void/90 text-text-secondary hover:text-text-primary"
-                    : "border-border-hairline bg-bg-raised text-text-secondary hover:text-text-primary",
-              )}
-            >
-              <Icon size={15} />
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* legend — proper card treatment, legible on any tile colour */}
-      <div
-        className={clsx(
-          "absolute bottom-4 left-4 z-[1000] rounded-lg border p-3 shadow-lg shadow-black/40 backdrop-blur",
-          satellite
-            ? "border-border-strong bg-bg-void/90"
-            : "border-border-hairline bg-bg-raised/90",
-        )}
-      >
+      {/* ── bottom-right: legend card ────────────────────────────────── */}
+      <div className="map-glass absolute bottom-4 right-4 z-[1000] w-[248px] rounded-xl p-3.5">
         <div className="mb-2 font-body text-[10px] font-semibold uppercase tracking-widest text-text-tertiary">
           Risk Status
         </div>
@@ -411,7 +370,7 @@ export default function MapCanvas({
             layer is on; hidden otherwise so the legend never lies */}
         {showFirms && layers.firms && (
           <>
-            <div className="mb-1.5 mt-3 border-t border-border-hairline pt-2.5 font-body text-[10px] font-semibold uppercase tracking-widest text-text-tertiary">
+            <div className="mb-1.5 mt-3 border-t border-white/[0.07] pt-2.5 font-body text-[10px] font-semibold uppercase tracking-widest text-text-tertiary">
               FRP (hotspots)
             </div>
             <div className="grid gap-1.5">
@@ -434,15 +393,12 @@ export default function MapCanvas({
         {/* deep link to the full explainer on the settings page */}
         <Link
           href="/settings#how-to-read"
-          className="mt-3 flex items-center gap-1.5 border-t border-border-hairline pt-2.5 font-body text-[10px] font-medium text-accent-primary transition-colors duration-150 hover:text-accent-secondary"
+          className="mt-3 flex items-center gap-1.5 border-t border-white/[0.07] pt-2.5 font-body text-[10px] font-medium text-accent-primary transition-colors duration-150 hover:text-accent-secondary"
         >
           <BookOpen size={11} aria-hidden />
           How to read this map
         </Link>
       </div>
-
-      {/* floating overlays above the map (detail slide-over) */}
-      {children}
     </div>
   );
 }

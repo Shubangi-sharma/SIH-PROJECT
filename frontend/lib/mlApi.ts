@@ -89,9 +89,10 @@ export interface PredictionResponseDto {
   class: ModelClass;
   probabilities: Record<ModelClass, number>;
   /**
-   * 0–100 scalar risk score. `null` since Phase 2A: the GRU risk models need
-   * the live H3 sequence pipeline (Phase 2C) — the service never fakes a
-   * number. UI must render a "pending" state, not coerce to 0.
+   * 0–100 scalar risk score — classification-derived. Computed as a weighted
+   * sum of class probabilities × domain risk weights (not the GRU temporal
+   * model). `null` only from legacy service builds that predate the weighted-
+   * probability computation. Current builds always return a real number.
    */
   risk_score: number | null;
   /** GRU per-horizon signals — always null on /predict until Phase 2C. */
@@ -311,16 +312,16 @@ export function fetchMlHotspots(params?: {
 /* presentation helpers (labels/colours only — no computation)          */
 /* ------------------------------------------------------------------ */
 
-/** Muted category colours, distinct from the 5-tier risk palette. */
+/** Vibrant category colours, distinct from the 5-tier risk palette. */
 export const MODEL_CLASS_COLORS: Record<string, string> = {
   // MLP (default)
-  Agricultural: "#B99B5E",
-  Forest_Vegetation: "#5FA97C",
-  Industrial: "#C08A62",
+  Agricultural: "#E0A84C",
+  Forest_Vegetation: "#4ECBA0",
+  Industrial: "#E08A52",
   Infrastructure_Energy: "#9186C4",
-  Mining: "#5CA0AD",
+  Mining: "#4FB3B3",
   // Legacy GBM — kept so old-model answers never render uncoloured.
-  Agricultural_Vegetation: "#B99B5E",
+  Agricultural_Vegetation: "#E0A84C",
   Mining_Extraction: "#9186C4",
-  Other_Persistent_Thermal_Source: "#5CA0AD",
+  Other_Persistent_Thermal_Source: "#4FB3B3",
 };

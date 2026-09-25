@@ -10,9 +10,9 @@ import MapCanvas, {
   MapMode,
 } from "@/components/MapCanvas";
 import DetailDrawer, { type DetailDrawerSelection } from "@/components/DetailDrawer";
+import AreaPanel from "@/components/AreaPanel";
 import TimelineSlider from "@/components/TimelineSlider";
 import ReplayControls from "@/components/ReplayControls";
-import RiskLegend from "@/components/RiskLegend";
 import { useReplay, replayActiveEventIndex } from "@/lib/replay";
 import type { Basemap, MapView } from "@/components/MapInner";
 import { useDebounced, useAnalyses, useFirms } from "@/lib/hooks";
@@ -49,7 +49,6 @@ export default function MapPage() {
   });
   const [layers, setLayers] = useState<Record<LayerId, boolean>>({
     firms: true,
-    boundaries: false,
   });
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -63,15 +62,14 @@ export default function MapPage() {
     if (key) setSelectedCell(null); // panels are mutually exclusive
   }, []);
 
-  /* -------- §10 H3 cell click panel (risk signals + clusters) -------- */
-  const [selectedCell, setSelectedCell] = useState<string | null>(null);
-  const handleCellClick = useCallback((cell: string | null) => {
-    setSelectedCell(cell);
-    if (cell) {
-      // one panel at a time — a cell click closes facility/hotspot panels
-      setSelectedId(null);
-      setSelectedHotspotKey(null);
-    }
+  /* -------- plain-language area click panel (replaces the H3 cell panel):
+     clicking open map shows what the area is / isn't monitored -------- */
+  const [selectedArea, setSelectedArea] = useState<{ lat: number; lng: number } | null>(null);
+  const handleAreaClick = useCallback((point: { lat: number; lng: number }) => {
+    setSelectedArea(point);
+    // one panel at a time — an area click closes facility/hotspot panels
+    setSelectedId(null);
+    setSelectedHotspotKey(null);
   }, []);
 
   /* -------- persistent detail drawer (right pane / bottom sheet) --------
@@ -81,8 +79,8 @@ export default function MapPage() {
      collapsing stays operator-controlled. */
   const [drawerCollapsed, setDrawerCollapsed] = useState(false);
   useEffect(() => {
-    if (selectedId || selectedHotspotKey || selectedCell) setDrawerCollapsed(false);
-  }, [selectedId, selectedHotspotKey, selectedCell]);
+    if (selectedId || selectedHotspotKey || selectedArea) setDrawerCollapsed(false);
+  }, [selectedId, selectedHotspotKey, selectedArea]);
 
   /* -------- backend data: computed analyses + stored detections -------- */
   const regionBboxes = REGION_BBOXES[mode];
@@ -221,7 +219,7 @@ export default function MapPage() {
 
   const handleSelect = useCallback((id: string) => {
     setSelectedId(id);
-    setSelectedCell(null); // panels are mutually exclusive
+    setSelectedArea(null); // panels are mutually exclusive
   }, []);
 
   const handleModeChange = useCallback(
@@ -229,7 +227,7 @@ export default function MapPage() {
       setMode(m);
       setSelectedId(null);
       setSelectedHotspotKey(null);
-      setSelectedCell(null);
+      setSelectedArea(null);
       setViewport(null);
       setView(
         m === "india"
@@ -295,12 +293,10 @@ export default function MapPage() {
             });
           },
         }
-      : selectedCell
-        ? { kind: "cell", h3Cell: selectedCell, onClose: () => setSelectedCell(null) }
-        : { kind: "empty" };
+      : { kind: "empty" };
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className="flex h-full flex-col overflow-hidden bg-gradient-mesh">
       {/* two-pane layout: map (left/top) + persistent DetailDrawer
           (right pane on lg:+, bottom sheet below lg:) */}
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
@@ -321,23 +317,18 @@ export default function MapPage() {
             selectedHotspotKey={selectedHotspotKey}
             onSelectHotspot={handleSelectHotspot}
             onViewport={handleViewport}
-            onCellClick={handleCellClick}
+            onAreaClick={handleAreaClick}
             filters={filters}
             onFiltersChange={setFilters}
           >
             {/* FIRMS feed status — always honest: live count or explicit error */}
             <div
               role="status"
-              className={clsx(
-                "absolute bottom-12 right-4 z-[1000] flex items-center gap-2 rounded-md border px-2.5 py-1.5 font-mono text-[11px] shadow-lg shadow-black/40",
-                firmsError
-                  ? "border-border-strong bg-bg-void/90 text-status-watch"
-                  : "border-border-hairline bg-bg-raised/95 text-text-secondary",
-              )}
+              className="map-glass absolute bottom-4 left-4 z-[1000] flex max-w-[calc(100%-560px)] items-center gap-2 rounded-lg px-3 py-2 font-mono text-[11px] text-text-secondary lg:max-w-[calc(100%-420px)]"
             >
               <span
                 className={clsx(
-                  "inline-block h-1.5 w-1.5 rounded-full",
+                  "inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full",
                   firmsError ? "bg-status-watch" : "animate-pulse bg-accent-secondary",
                 )}
               />
@@ -348,27 +339,23 @@ export default function MapPage() {
                   : `VIIRS · ${filteredHotspots.length} detections${filterDate ? ` (${filterDate})` : " (10d)"}${filters.frpBand != null ? " · FRP filtered" : ""}`}
             </div>
 
-            {/* risk-signal legend — threshold wording, never probabilities
-                (LIMITATIONS.md §3; the 7-day caveat comes from the model card) */}
-            <RiskLegend className="absolute bottom-24 right-4 z-[1000] w-[268px] rounded-xl border border-border-hairline bg-bg-surface/95 p-3.5 shadow-lg shadow-black/40 backdrop-blur" />
-
             {/* timeline scrubber (hide while replay owns the date filter) */}
             {!replay.currentDate && (
               <TimelineSlider
                 hotspots={hotspots}
                 onFilterDate={setFilterDate}
-                className="absolute bottom-4 left-4 right-4 z-[1000]"
+                className="map-glass absolute bottom-4 left-1/2 z-[1000] w-[min(480px,calc(100%-560px))] -translate-x-1/2 lg:w-[min(480px,calc(100%-420px))]"
               />
             )}
 
             {/* replay transport — appears only when a facility is selected (B1) */}
-            <ReplayControls replay={replay} className="absolute bottom-4 left-4 z-[1000]" />
+            <ReplayControls replay={replay} className="map-glass absolute bottom-4 left-1/2 z-[1000] -translate-x-1/2" />
 
             {/* backend status chips */}
             {analysesError && (
               <div
                 role="status"
-                className="absolute left-4 top-[52px] z-[1000] rounded-md border border-border-strong bg-bg-void/90 px-2.5 py-1.5 font-mono text-[11px] text-status-watch shadow-lg shadow-black/40"
+                className="map-glass absolute left-4 top-4 z-[1000] rounded-lg px-3 py-2 font-mono text-[11px] text-status-watch"
               >
                 Backend analyses unavailable
               </div>
@@ -385,6 +372,18 @@ export default function MapPage() {
           viewportAnalyses={filteredAnalyses}
           viewportBbox={debouncedViewport}
         />
+
+        {/* area panel — shown when a point outside every facility radius is
+            clicked; replaces the old raw H3 cell panel. */}
+        {selectedArea && (
+          <div className="map-glass absolute bottom-4 left-4 top-4 z-[1200] w-[340px] max-w-[calc(100%-32px)] overflow-hidden rounded-xl">
+            <AreaPanel
+              lat={selectedArea.lat}
+              lng={selectedArea.lng}
+              onClose={() => setSelectedArea(null)}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

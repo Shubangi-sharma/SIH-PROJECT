@@ -3,20 +3,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bell, Search, User } from "lucide-react";
+import BrandMark from "@/components/BrandMark";
 import { FacilityAnalysis, STATUS_META, statusColorHex } from "@/lib/types";
 import { useAnalyses } from "@/lib/hooks";
 import { REGION_BBOXES } from "@/lib/regions";
 import clsx from "clsx";
-
-/** Triangular signal glyph — deliberately not a literal flame. */
-function SignalMark() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path d="M12 3 L21 20 H3 Z" stroke="#6E93BE" strokeWidth="2" strokeLinejoin="round" />
-      <path d="M12 9.5 L16.4 17.5 H7.6 Z" fill="#6E93BE" />
-    </svg>
-  );
-}
 
 export default function TopBar({ unreadCritical }: { unreadCritical: number }) {
   const router = useRouter();
@@ -71,16 +62,23 @@ export default function TopBar({ unreadCritical }: { unreadCritical: number }) {
   return (
     <header
       ref={rootRef}
-      className="relative z-[1200] flex h-[56px] flex-shrink-0 items-center gap-4 border-b border-border-hairline bg-bg-surface px-4"
+      className="relative z-[1200] flex h-[56px] flex-shrink-0 items-center gap-4 border-b border-white/[0.06]"
+      style={{
+        background:
+          "linear-gradient(180deg, rgba(12, 16, 21, 0.88) 0%, rgba(9, 12, 16, 0.78) 100%)",
+        backdropFilter: "blur(20px) saturate(1.3)",
+        WebkitBackdropFilter: "blur(20px) saturate(1.3)",
+        boxShadow: "0 1px 0 rgba(91, 155, 213, 0.05)",
+      }}
     >
-      {/* brand */}
+      {/* brand — the one shared glyph */}
       <button
         type="button"
         onClick={() => router.push("/")}
         aria-label="PYROSENSE home"
-        className="flex items-center gap-2.5"
+        className="group flex items-center gap-2.5 transition-opacity duration-200 hover:opacity-85"
       >
-        <SignalMark />
+        <BrandMark size={24} />
         <span className="font-display text-base font-semibold tracking-wide text-text-primary">
           PYRO<span className="text-accent-primary">SENSE</span>
         </span>
@@ -104,10 +102,10 @@ export default function TopBar({ unreadCritical }: { unreadCritical: number }) {
           }}
           placeholder="Search facility, region, or coordinates…"
           aria-label="Search facilities"
-          className="h-9 w-full rounded-lg border border-border-hairline bg-bg-inset pl-9 pr-3 font-mono text-[13px] text-text-primary placeholder:text-text-tertiary focus:border-accent-primary/60 focus:outline-none focus:ring-1 focus:ring-accent-primary/30"
+          className="h-9 w-full rounded-lg border border-border-hairline bg-bg-inset/50 pl-9 pr-3 font-mono text-[13px] text-text-primary placeholder:text-text-tertiary focus:border-accent-primary/50 focus:outline-none focus:ring-1 focus:ring-accent-primary/20 transition-all duration-200"
         />
         {results.length > 0 && (
-          <div className="absolute left-0 right-0 top-full z-50 mt-1.5 overflow-hidden rounded-lg border border-border-hairline bg-bg-raised shadow-lg shadow-black/50">
+          <div className="absolute left-0 right-0 top-full z-50 mt-1.5 overflow-hidden rounded-xl border border-border-hairline bg-bg-raised/95 shadow-lg shadow-black/50 backdrop-blur-xl">
             {results.map((a) => {
               const hex = statusColorHex(a.status);
               return (
@@ -138,7 +136,7 @@ export default function TopBar({ unreadCritical }: { unreadCritical: number }) {
       </div>
 
       {/* right cluster */}
-      <div className="ml-auto flex items-center gap-2 sm:ml-0 sm:gap-4">
+      <div className="ml-auto flex items-center gap-2 sm:ml-0 sm:gap-3">
         {/* command counters — always visible */}
         <div className="hidden items-center gap-3 md:flex">
           {analyses.length > 0 ? (
@@ -147,18 +145,18 @@ export default function TopBar({ unreadCritical }: { unreadCritical: number }) {
                 LIVE · {analyses.length} sites
               </span>
               {criticalCount > 0 && (
-                <span className="inline-flex items-center gap-1 rounded bg-status-critical/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-status-critical">
-                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-status-critical" />
+                <span className="inline-flex items-center gap-1 rounded-full bg-status-critical/10 px-2 py-0.5 font-mono text-[10px] font-semibold text-status-critical ring-1 ring-status-critical/20">
+                  <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-status-critical" />
                   {criticalCount} CRT
                 </span>
               )}
               {suspiciousCount > 0 && (
-                <span className="inline-flex items-center gap-1 rounded bg-status-suspicious/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-status-suspicious">
+                <span className="inline-flex items-center gap-1 rounded-full bg-status-suspicious/10 px-2 py-0.5 font-mono text-[10px] font-semibold text-status-suspicious ring-1 ring-status-suspicious/20">
                   {suspiciousCount} SUS
                 </span>
               )}
               {watchCount > 0 && (
-                <span className="inline-flex items-center gap-1 rounded bg-status-watch/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-status-watch">
+                <span className="inline-flex items-center gap-1 rounded-full bg-status-watch/10 px-2 py-0.5 font-mono text-[10px] font-semibold text-status-watch ring-1 ring-status-watch/20">
                   {watchCount} WTC
                 </span>
               )}
@@ -181,23 +179,23 @@ export default function TopBar({ unreadCritical }: { unreadCritical: number }) {
             aria-label={`Notifications — ${unreadCritical} unread critical`}
             aria-expanded={bellOpen}
             className={clsx(
-              "relative flex h-9 w-9 items-center justify-center rounded-lg text-text-secondary transition-colors duration-150 hover:bg-bg-raised hover:text-text-primary",
-              bellOpen && "bg-bg-raised text-text-primary",
+              "relative flex h-9 w-9 items-center justify-center rounded-lg text-text-secondary transition-all duration-200 hover:bg-bg-raised/60 hover:text-text-primary",
+              bellOpen && "bg-bg-raised/60 text-text-primary",
             )}
           >
             <Bell size={17} />
             {unreadCritical > 0 && (
-              <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-status-critical ring-2 ring-bg-surface" />
+              <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-status-critical ring-2 ring-bg-base animate-pulse" />
             )}
           </button>
 
           {bellOpen && (
-            <div className="absolute right-0 top-full z-50 mt-1.5 w-[320px] overflow-hidden rounded-lg border border-border-hairline bg-bg-raised shadow-lg shadow-black/50">
-              <div className="border-b border-border-hairline px-3 py-2 font-body text-[10px] font-semibold uppercase tracking-widest text-text-tertiary">
+            <div className="absolute right-0 top-full z-50 mt-1.5 w-[340px] overflow-hidden rounded-xl border border-border-hairline bg-bg-raised/95 shadow-card-elevated backdrop-blur-xl">
+              <div className="border-b border-border-hairline px-4 py-2.5 font-body text-[10px] font-semibold uppercase tracking-widest text-text-tertiary">
                 Critical alerts · computed from live FIRMS
               </div>
               {criticalFacilities.length === 0 ? (
-                <p className="px-3 py-4 text-xs text-text-secondary">
+                <p className="px-4 py-5 text-xs text-text-secondary">
                   No critical facilities right now — all monitored sites within
                   baseline.
                 </p>
@@ -210,10 +208,10 @@ export default function TopBar({ unreadCritical }: { unreadCritical: number }) {
                       router.push(`/facilities/${a.facility.id}`);
                       setBellOpen(false);
                     }}
-                    className="flex w-full items-center gap-2.5 border-b border-border-hairline px-3 py-2.5 text-left transition-colors duration-150 last:border-b-0 hover:bg-bg-surface"
+                    className="flex w-full items-center gap-2.5 border-b border-border-hairline px-4 py-3 text-left transition-colors duration-150 last:border-b-0 hover:bg-bg-surface/50"
                   >
                     <span
-                      className="h-2 w-2 flex-shrink-0 rounded-full"
+                      className="h-2 w-2 flex-shrink-0 rounded-full animate-pulse-glow"
                       style={{ backgroundColor: STATUS_META.critical.hex }}
                     />
                     <span className="min-w-0">
@@ -243,16 +241,16 @@ export default function TopBar({ unreadCritical }: { unreadCritical: number }) {
             aria-label="Account menu"
             aria-expanded={avatarOpen}
             className={clsx(
-              "flex h-8 w-8 items-center justify-center rounded-full border border-border-hairline bg-bg-raised text-text-secondary transition-colors duration-150 hover:border-border-strong hover:text-text-primary",
-              avatarOpen && "border-border-strong text-text-primary",
+              "flex h-8 w-8 items-center justify-center rounded-full border border-border-hairline bg-bg-raised/50 text-text-secondary transition-all duration-200 hover:border-accent-primary/30 hover:text-text-primary",
+              avatarOpen && "border-accent-primary/30 text-text-primary",
             )}
           >
             <User size={15} />
           </button>
 
           {avatarOpen && (
-            <div className="absolute right-0 top-full z-50 mt-1.5 w-[220px] overflow-hidden rounded-lg border border-border-hairline bg-bg-raised shadow-lg shadow-black/50">
-              <div className="border-b border-border-hairline px-3 py-2.5">
+            <div className="absolute right-0 top-full z-50 mt-1.5 w-[220px] overflow-hidden rounded-xl border border-border-hairline bg-bg-raised/95 shadow-card-elevated backdrop-blur-xl">
+              <div className="border-b border-border-hairline px-4 py-3">
                 <p className="text-sm text-text-primary">Station Operator</p>
                 <p className="font-mono text-[10px] text-text-tertiary">
                   ops@pyrosense.demo
@@ -264,7 +262,7 @@ export default function TopBar({ unreadCritical }: { unreadCritical: number }) {
                   router.push("/settings");
                   setAvatarOpen(false);
                 }}
-                className="block w-full px-3 py-2.5 text-left text-sm text-text-secondary transition-colors duration-150 hover:bg-bg-surface hover:text-text-primary"
+                className="block w-full px-4 py-3 text-left text-sm text-text-secondary transition-colors duration-150 hover:bg-bg-surface/50 hover:text-text-primary"
               >
                 Settings
               </button>

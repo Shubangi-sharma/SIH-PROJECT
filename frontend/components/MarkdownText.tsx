@@ -18,12 +18,12 @@ import remarkGfm from "remark-gfm";
 
 /** Words that get their status-palette color when they appear in text. */
 const STATUS_WORDS: [RegExp, string][] = [
-  [/\b(critical)\b/gi, "var(--color-status-critical, #C26A6A)"],
-  [/\b(suspicious)\b/gi, "var(--color-status-suspicious, #C08A62)"],
-  [/\b(watch)\b/gi, "var(--color-status-watch, #B99B5E)"],
-  [/\b(normal)\b/gi, "var(--color-status-normal, #5FA97C)"],
-  [/\b(wildfire|industrial fire)\b/gi, "#C26A6A"],
-  [/\b(gas flare)\b/gi, "#C08A62"],
+  [/\b(critical)\b/gi, "var(--color-status-critical, #E06060)"],
+  [/\b(suspicious)\b/gi, "var(--color-status-suspicious, #E08A52)"],
+  [/\b(watch)\b/gi, "var(--color-status-watch, #E0A84C)"],
+  [/\b(normal)\b/gi, "var(--color-status-normal, #4ECBA0)"],
+  [/\b(wildfire|industrial fire)\b/gi, "#E06060"],
+  [/\b(gas flare)\b/gi, "#E08A52"],
 ];
 
 /** Wrap status words in a colored span (skips code/heading content). */

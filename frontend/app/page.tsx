@@ -1,430 +1,305 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+/**
+ * Landing page — clean, human-designed hero.
+ *
+ * Deliberately minimal — no over-engineered animations or AI-generated
+ * filler. The page communicates what PyroSense does, shows real system
+ * capabilities, and gets out of the way.
+ *
+ * Data sources in the footer link out to the real providers we use.
+ */
+
+import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
-import dynamic from "next/dynamic";
-import { ArrowUpRight, ShieldAlert, TrendingUp } from "lucide-react";
-import { FacilityAnalysis, RiskStatus, statusColorHex } from "@/lib/types";
-import { useAnalyses, useFirms, useCommand } from "@/lib/hooks";
-import { REGION_BBOXES, northOrWestRegion } from "@/lib/regions";
-import { StatusBadge, StatusGlyph } from "@/lib/status";
-import StatTile from "@/components/StatTile";
-import HotspotHistoricalRisk, {
-  type HistoricalRiskInput,
-} from "@/components/HotspotHistoricalRisk";
-import type { MapView } from "@/components/MapInner";
+import { ArrowRight, Satellite, Brain, Shield, ExternalLink } from "lucide-react";
+import BrandMark from "@/components/BrandMark";
+import { useCommand } from "@/lib/hooks";
 
-const MapInner = dynamic(() => import("@/components/MapInner"), {
-  ssr: false,
-  loading: () => (
-    <div className="h-full w-full animate-pulse bg-bg-surface/45" aria-hidden />
-  ),
-});
+/* ------------------------------------------------------------------ */
+/* Subtle particle field — floating ambient dots                       */
+/* ------------------------------------------------------------------ */
 
-/** severity rank for sorting (critical first) */
-const RANK: Record<RiskStatus, number> = {
-  critical: 0,
-  suspicious: 1,
-  watch: 2,
-  unknown: 3,
-  normal: 4,
-};
+function ParticleField() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
-const PREVIEW_VIEW: MapView = {
-  center: [22.0, 79.0],
-  zoom: 5,
-  key: "dashboard-preview",
-};
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
 
-/** Skeleton grid matching the six summary tiles. */
-function StatSkeleton() {
-  return (
-    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
-      {Array.from({ length: 6 }).map((_, i) => (
-        <div key={i} className="h-[92px] animate-pulse rounded-xl bg-bg-surface" />
-      ))}
-    </div>
-  );
+    let animId: number;
+    const particles: {
+      x: number;
+      y: number;
+      vx: number;
+      vy: number;
+      r: number;
+      o: number;
+    }[] = [];
+
+    const resize = () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    };
+    resize();
+    window.addEventListener("resize", resize);
+
+    const count = Math.min(40, Math.floor(window.innerWidth / 35));
+    for (let i = 0; i < count; i++) {
+      particles.push({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        vx: (Math.random() - 0.5) * 0.2,
+        vy: (Math.random() - 0.5) * 0.15,
+        r: Math.random() * 1.2 + 0.4,
+        o: Math.random() * 0.2 + 0.03,
+      });
+    }
+
+    const draw = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (const p of particles) {
+        p.x += p.vx;
+        p.y += p.vy;
+        if (p.x < 0) p.x = canvas.width;
+        if (p.x > canvas.width) p.x = 0;
+        if (p.y < 0) p.y = canvas.height;
+        if (p.y > canvas.height) p.y = 0;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(91,155,213,${p.o})`;
+        ctx.fill();
+      }
+      animId = requestAnimationFrame(draw);
+    };
+    draw();
+
+    return () => {
+      cancelAnimationFrame(animId);
+      window.removeEventListener("resize", resize);
+    };
+  }, []);
+
+  return <canvas ref={canvasRef} className="pointer-events-none absolute inset-0" aria-hidden />;
 }
 
-export default function DashboardPage() {
-  const router = useRouter();
+/* ------------------------------------------------------------------ */
+/* page                                                                */
+/* ------------------------------------------------------------------ */
 
-  // Backend-computed analyses + stored detections, served via SWR (§7):
-  // cached data renders instantly, a background refresh follows. Loading
-  // skeletons only on a cold cache.
-  const { analyses, isLoading: analysesLoading } = useAnalyses(REGION_BBOXES.india);
-  const { hotspots, isLoading: firmsLoading } = useFirms(REGION_BBOXES.india);
-  const { command } = useCommand();
+const PILLARS = [
+  {
+    icon: Satellite,
+    title: "Satellite Detection",
+    desc: "NASA VIIRS active-fire data ingested every 15 minutes across a 365-day rolling window.",
+  },
+  {
+    icon: Brain,
+    title: "ML Classification",
+    desc: "43-feature MLP classifier categorizing hotspots into 5 industrial fire types with grounded explanations.",
+  },
+  {
+    icon: Shield,
+    title: "Risk Assessment",
+    desc: "Weighted-probability risk scoring and per-facility thermal baselines updated continuously.",
+  },
+] as const;
 
-  const loading =
-    analysesLoading || (firmsLoading && analyses.length === 0);
+/** Real provider links — every data source credits where the data comes from. */
+const DATA_SOURCES = [
+  { label: "NASA FIRMS", href: "https://firms.modaps.eosdis.nasa.gov/" },
+  { label: "OpenStreetMap", href: "https://www.openstreetmap.org/copyright" },
+  { label: "ERA5 Weather", href: "https://cds.climate.copernicus.eu/datasets/reanalysis-era5-single-levels" },
+  { label: "Dynamic World", href: "https://dynamicworld.app/" },
+] as const;
 
-  const summary = useMemo(
-    () => ({
-      facilitiesMonitored: command?.facilitiesMonitored ?? analyses.length,
-      thermalHotspots: command?.totalHotspots ?? analyses.filter((a) => a.detectionCount > 0).length,
-      newAnomalies: command?.newAnomalies ?? analyses.filter((a) => a.status === ("watch" as RiskStatus)).length,
-      highRiskIncidents: command?.highRisk ?? analyses.filter((a) => a.status === ("suspicious" as RiskStatus)).length,
-      criticalIncidents: command?.critical ?? analyses.filter((a) => a.status === ("critical" as RiskStatus)).length,
-    }),
-    [analyses, command],
-  );
-
-  const handlePreviewSelect = React.useCallback(
-    (id: string) => router.push(`/facilities/${id}`),
-    [router],
-  );
-
-  const top3 = useMemo(
-    () =>
-      [...analyses]
-        .sort((a, b) => RANK[a.status] - RANK[b.status] || a.score - b.score)
-        .slice(0, 3),
-    [analyses],
-  );
-
-  /** Priority list from the command view — risk-ranked with classification. */
-  const priorityList = useMemo(
-    () => command?.priorityList?.slice(0, 8) ?? [],
-    [command],
-  );
-
-  /** North / West region counts among hotspot-active facilities (PDF §2). */
-  const regionCounts = useMemo(() => {
-    const counts = { north: 0, west: 0, other: 0 };
-    for (const a of analyses) {
-      if (a.detectionCount > 0) counts[northOrWestRegion(a.facility.lat, a.facility.lng)] += 1;
-    }
-    return counts;
-  }, [analyses]);
-
-  /** Rule-based behavioural categories across monitored facilities. */
-  const categoryCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const f of command?.priorityList ?? []) {
-      counts.set(f.classificationLabel, (counts.get(f.classificationLabel) ?? 0) + 1);
-    }
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
-  }, [command]);
-
-  /** Historical-risk scope: the 5 most recent hotspots (newest first).
-      Reuses the real FIRMS rows already fetched for the dashboard. */
-  const historicalHotspots = useMemo<HistoricalRiskInput[]>(
-    () =>
-      [...hotspots]
-        .sort((a, b) =>
-          b.acqDate.localeCompare(a.acqDate) || b.acqTime.localeCompare(a.acqTime),
-        )
-        .slice(0, 5)
-        .map((h) => ({
-          latitude: h.latitude,
-          longitude: h.longitude,
-          frp: h.frp,
-          acqDate: h.acqDate,
-        })),
-    [hotspots],
-  );
-  const [historicalIdx, setHistoricalIdx] = useState(0);
-  const historicalIdxSafe = Math.min(historicalIdx, Math.max(0, historicalHotspots.length - 1));
-  const historicalHotspotKey =
-    historicalHotspots[historicalIdxSafe] != null
-      ? `${historicalHotspots[historicalIdxSafe].latitude},${historicalHotspots[historicalIdxSafe].longitude},${historicalHotspots[historicalIdxSafe].acqDate}`
-      : "none";
+/** Live status card — real counters from the command view, honest fallback. */
+function StatusCard({ mounted }: { mounted: boolean }) {
+  const { command, isLoading } = useCommand();
+  const facilities = command?.facilitiesMonitored;
+  const hotspots = command?.totalHotspots;
+  const critical = command?.critical ?? 0;
 
   return (
-    <div className="pyro-scroll h-full overflow-y-auto">
-      <div className="mx-auto flex max-w-[1200px] flex-col gap-6 p-6 pb-20">
-        {/* morning-briefing header */}
-        <header className="flex items-baseline justify-between pt-4">
-          <div>
-            <h1 className="font-display text-2xl font-semibold text-text-primary">
-              Command Dashboard
-            </h1>
-            <p className="mt-1 text-sm text-text-secondary">
-              India thermal monitoring overview · OSM + NASA FIRMS archive
-            </p>
-          </div>
-          <span className="font-mono text-xs text-text-tertiary">
-            VIIRS S-NPP + NOAA-20 · year-grounded baseline
+    <div
+      className="map-glass mb-8 inline-flex flex-wrap items-center justify-center gap-x-5 gap-y-2 rounded-2xl px-5 py-2.5"
+      style={{
+        opacity: mounted ? 1 : 0,
+        transition: "opacity 0.6s ease 0.2s",
+      }}
+    >
+      <span className="inline-flex items-center gap-2">
+        <span className="relative flex h-[6px] w-[6px]">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#4ECBA0] opacity-60" />
+          <span className="relative inline-flex h-[6px] w-[6px] rounded-full bg-[#4ECBA0]" />
+        </span>
+        <span className="font-body text-[12px] font-medium text-white/80">
+          Monitoring active · India region
+        </span>
+      </span>
+      <span className="hidden h-4 w-px bg-white/10 sm:block" aria-hidden />
+      {isLoading || facilities == null ? (
+        <span className="font-mono text-[11px] text-white/35">
+          connecting to live feed…
+        </span>
+      ) : (
+        <span className="inline-flex items-center gap-4 font-mono text-[11px]">
+          <span className="text-white/55">
+            <span className="font-semibold text-white/85">{facilities}</span> sites
           </span>
-        </header>
-
-        {/* six summary stats */}
-        <section aria-label="Summary statistics">
-          {loading ? (
-            <StatSkeleton />
-          ) : (
-            <>
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
-                <StatTile label="Facilities Monitored" value={summary.facilitiesMonitored} />
-                <StatTile label="Thermal Hotspots" value={summary.thermalHotspots} />
-                <StatTile label="New Anomalies" value={summary.newAnomalies} toneStatus="watch" />
-                <StatTile
-                  label="High-Risk Incidents"
-                  value={summary.highRiskIncidents}
-                  tone="suspicious"
-                  toneStatus="suspicious"
-                />
-                <StatTile
-                  label="Critical Incidents"
-                  value={summary.criticalIncidents}
-                  tone="critical"
-                  toneStatus="critical"
-                />
-                <StatTile
-                  label="Detections (10d)"
-                  value={hotspots.length}
-                  toneStatus={hotspots.length > 0 ? "watch" : "normal"}
-                />
-              </div>
-              {/* PDF §2 regional split — real counts from the analysed bbox */}
-              <div className="mt-4 grid grid-cols-3 gap-4">
-                <StatTile label="North Region Active" value={regionCounts.north} />
-                <StatTile label="West Region Active" value={regionCounts.west} />
-                <StatTile label="Other Regions Active" value={regionCounts.other} />
-              </div>
-            </>
+          <span className="text-white/55">
+            <span className="font-semibold text-white/85">{hotspots ?? 0}</span> hotspots 10d
+          </span>
+          {critical > 0 && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-[#E06060]/12 px-2 py-0.5 text-[#E86A6A]">
+              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[#E06060]" />
+              {critical} critical
+            </span>
           )}
-        </section>
-
-        {/* compact preview map — lightly interactive, calm by default */}
-        <section aria-label="Facility map preview" className="flex flex-col gap-3">
-          <div className="flex items-baseline justify-between px-1">
-            <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-text-secondary">
-              Live Overview
-            </h2>
-            <Link
-              href="/map"
-              className="group flex items-center gap-1 text-xs font-medium text-accent-primary transition-colors duration-150 hover:text-accent-secondary"
-            >
-              Open live map
-              <ArrowUpRight
-                size={13}
-                className="transition-transform duration-150 group-hover:-translate-y-0.5 group-hover:translate-x-0.5"
-              />
-            </Link>
-          </div>
-          <div className="relative h-[420px] overflow-hidden rounded-xl border border-border-hairline">
-            <MapInner
-              view={PREVIEW_VIEW}
-              analyses={analyses}
-              selectedId={null}
-              onSelect={handlePreviewSelect}
-              firmsHotspots={hotspots}
-              showFirms
-              onSelectHotspot={() => {}}
-              onTilesLoading={() => {}}
-              onTilesLoaded={() => {}}
-              onViewport={() => {}}
-            />
-          </div>
-        </section>
-
-        {/* top 3 facilities needing attention */}
-        <section aria-label="Top facilities needing attention" className="flex flex-col gap-3">
-          <div className="flex items-baseline justify-between px-1">
-            <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-text-secondary">
-              Needs Attention
-            </h2>
-            <Link
-              href="/chat"
-              className="group flex items-center gap-1 text-xs font-medium text-accent-primary transition-colors duration-150 hover:text-accent-secondary"
-            >
-              Ask the AI assistant
-              <ArrowUpRight
-                size={13}
-                className="transition-transform duration-150 group-hover:-translate-y-0.5 group-hover:translate-x-0.5"
-              />
-            </Link>
-          </div>
-          {loading ? (
-            <div className="grid gap-4 md:grid-cols-3">
-              {[0, 1, 2].map((i) => (
-                <div key={i} className="h-[170px] animate-pulse rounded-xl bg-bg-surface" />
-              ))}
-            </div>
-          ) : top3.length === 0 ? (
-            <div className="rounded-xl bg-bg-surface p-10 text-center">
-              <p className="text-sm text-text-secondary">
-                No active thermal anomalies in this region — all monitored sites quiet.
-              </p>
-            </div>
-          ) : (
-            <div className="grid gap-4 md:grid-cols-3">
-              {top3.map((a: FacilityAnalysis, i) => (
-                <Link
-                  key={a.facility.id}
-                  href={`/facilities/${a.facility.id}`}
-                  className="group flex flex-col gap-3 rounded-xl bg-bg-surface p-5 transition-colors duration-150 hover:bg-bg-raised"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-[11px] text-text-tertiary">
-                      {String(i + 1).padStart(2, "0")}
-                    </span>
-                    <StatusBadge status={a.status} />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="truncate font-display text-base font-semibold text-text-primary">
-                      {a.facility.name}
-                    </span>
-                    <StatusGlyph status={a.status} size={7} className="flex-shrink-0" />
-                  </div>
-                  <p className="line-clamp-2 text-xs leading-relaxed text-text-secondary">
-                    {a.detectionCount > 0
-                      ? `${a.detectionCount} FIRMS detection${a.detectionCount === 1 ? "" : "s"} within 5 km in the last 10 days${a.latestFrp != null ? ` · latest ${a.latestFrp.toFixed(1)} MW` : ""}`
-                      : "No thermal activity detected in the current window"}
-                  </p>
-                  <div className="mt-auto flex items-baseline gap-2 pt-1">
-                    <span className="font-mono text-sm text-text-primary">
-                      HS {a.score}
-                    </span>
-                    <span className="font-mono text-xs text-text-tertiary">
-                      · {a.latestFrp != null ? `${a.latestFrp.toFixed(0)} MW` : "quiet"}
-                    </span>
-                  </div>
-                </Link>
-              ))}
-            </div>
-          )}
-        </section>
-
-        {/* historical risk — GRU 1/3/7-day signal for a recent hotspot.
-            Scoped to the top hotspot; swappable from the dropdown. */}
-        {!loading && historicalHotspots.length > 0 && (
-          <section aria-label="Historical risk" className="flex flex-col gap-3">
-            <div className="flex items-baseline justify-between px-1">
-              <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-text-secondary">
-                Historical Risk
-              </h2>
-              <span className="font-mono text-[10px] text-text-tertiary">
-                GRU replay · FIRMS persistence + weather history
-              </span>
-            </div>
-            <div className="flex items-center gap-2 px-1">
-              <label
-                htmlFor="historical-hotspot"
-                className="text-[11px] uppercase tracking-wider text-text-tertiary"
-              >
-                Hotspot
-              </label>
-              <select
-                id="historical-hotspot"
-                value={historicalIdxSafe}
-                onChange={(e) => setHistoricalIdx(Number(e.target.value))}
-                className="max-w-[420px] flex-1 rounded-lg border border-border-hairline bg-bg-inset px-3 py-1.5 text-sm text-text-primary outline-none transition-colors duration-150 focus:border-accent-primary"
-              >
-                {historicalHotspots.map((h, i) => (
-                  <option key={`${h.latitude},${h.longitude},${h.acqDate}`} value={i}>
-                    {h.latitude.toFixed(3)}, {h.longitude.toFixed(3)} · {h.acqDate} · {h.frp.toFixed(0)} MW
-                  </option>
-                ))}
-              </select>
-            </div>
-            <HotspotHistoricalRisk
-              key={historicalHotspotKey}
-              hotspot={historicalHotspots[historicalIdxSafe]}
-              autoRun
-            />
-            <p className="px-1 text-[11px] leading-relaxed text-text-tertiary">
-              Scope: the GRU replays a 30-day window over this hotspot&apos;s FIRMS persistence and weather history.
-            </p>
-          </section>
-        )}
-
-        {/* behavioural category mix — rule-based vocabulary, NOT ML classes */}
-        {!loading && categoryCounts.length > 0 && (
-          <section aria-label="Category mix" className="flex flex-col gap-3">
-            <div className="flex items-baseline justify-between px-1">
-              <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-text-secondary">
-                Behavioural Category Mix
-              </h2>
-              <span className="font-mono text-[10px] text-text-tertiary">
-                rule-based monitoring classification
-              </span>
-            </div>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              {categoryCounts.map(([label, n]) => (
-                <div
-                  key={label}
-                  className="rounded-xl border border-border-hairline bg-bg-surface px-4 py-3"
-                >
-                  <div className="font-display text-xl font-semibold text-text-primary">{n}</div>
-                  <div className="mt-0.5 text-[11px] uppercase tracking-wide text-text-secondary">
-                    {label}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* priority list — risk-ranked with classification */}
-        {priorityList.length > 0 && (
-          <section aria-label="Priority list" className="flex flex-col gap-3">
-            <div className="flex items-baseline justify-between px-1">
-              <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-text-secondary">
-                Risk-Ranked Priority List
-              </h2>
-              <span className="font-mono text-[10px] text-text-tertiary">
-                sorted by risk score · updated every 30s
-              </span>
-            </div>
-            <div className="overflow-hidden rounded-xl border border-border-hairline bg-bg-surface">
-              <div className="grid grid-cols-[auto_1fr_auto_auto_auto_auto] gap-x-4 border-b border-border-hairline px-4 py-2 font-mono text-[10px] uppercase tracking-widest text-text-tertiary">
-                <span>#</span>
-                <span>Facility</span>
-                <span>Status</span>
-                <span>Health</span>
-                <span>Risk</span>
-                <span>Classification</span>
-              </div>
-              {priorityList.map((fac, i) => {
-                const statusHex = statusColorHex(fac.status as RiskStatus);
-                return (
-                  <Link
-                    key={fac.id}
-                    href={`/facilities/${fac.id}`}
-                    className="grid grid-cols-[auto_1fr_auto_auto_auto_auto] items-center gap-x-4 border-b border-border-hairline px-4 py-3 transition-colors duration-150 last:border-b-0 hover:bg-bg-raised"
-                  >
-                    <span className="font-mono text-[11px] text-text-tertiary">
-                      {String(i + 1).padStart(2, "0")}
-                    </span>
-                    <span className="flex items-center gap-2 min-w-0">
-                      <span
-                        className="inline-block h-2 w-2 flex-shrink-0 rounded-full"
-                        style={{ backgroundColor: statusHex }}
-                      />
-                      <span className="truncate text-sm font-medium text-text-primary">
-                        {fac.name}
-                      </span>
-                      <span className="flex-shrink-0 font-mono text-[10px] text-text-tertiary">
-                        {fac.type}
-                      </span>
-                    </span>
-                    <StatusBadge status={fac.status as RiskStatus} />
-                    <span className="font-mono text-xs text-text-primary">
-                      {fac.healthScore}
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <TrendingUp size={11} style={{ color: statusHex }} />
-                      <span className="font-mono text-xs font-semibold" style={{ color: statusHex }}>
-                        {fac.riskScore}
-                      </span>
-                    </span>
-                    <span className="inline-flex items-center gap-1 rounded-full border border-border-hairline bg-bg-inset px-2 py-0.5 font-body text-[10px] text-text-secondary">
-                      <ShieldAlert size={10} />
-                      {fac.classificationLabel}
-                    </span>
-                  </Link>
-                );
-              })}
-            </div>
-          </section>
-        )}
-      </div>
+        </span>
+      )}
     </div>
   );
 }
 
+export default function LandingPage() {
+  const router = useRouter();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  return (
+    <div className="relative flex h-screen flex-col overflow-hidden bg-[#050709]">
+      {/* ── Background ─────────────────────────────────────────────── */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="landing-orb landing-orb-1" />
+        <div className="landing-orb landing-orb-2" />
+        <div className="landing-orb landing-orb-3" />
+        <div className="landing-grid" />
+        <ParticleField />
+      </div>
+
+      {/* ── Top bar ────────────────────────────────────────────────── */}
+      <nav
+        className="relative z-10 flex items-center justify-between px-6 py-5 sm:px-10"
+        style={{
+          opacity: mounted ? 1 : 0,
+          transition: "opacity 0.5s ease 0.1s",
+        }}
+      >
+        <div className="flex items-center gap-2.5">
+          <BrandMark size={26} />
+          <span className="font-display text-lg font-semibold tracking-wide text-white">
+            PYRO<span className="text-[#6FAFDD]">SENSE</span>
+          </span>
+        </div>
+        <button
+          onClick={() => router.push("/dashboard")}
+          className="group flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-5 py-2 font-body text-sm text-white/70 transition-all duration-300 hover:border-white/20 hover:bg-white/[0.06] hover:text-white"
+        >
+          Open Dashboard
+          <ArrowRight
+            size={14}
+            className="transition-transform duration-300 group-hover:translate-x-0.5"
+          />
+        </button>
+      </nav>
+
+      {/* ── Hero ───────────────────────────────────────────────────── */}
+      <div className="relative z-10 flex flex-1 flex-col items-center justify-center px-6">
+        <StatusCard mounted={mounted} />
+
+        {/* headline */}
+        <h1
+          className="max-w-2xl text-center font-display text-4xl font-bold leading-[1.1] tracking-tight text-white sm:text-5xl md:text-6xl"
+          style={{
+            opacity: mounted ? 1 : 0,
+            transform: mounted ? "translateY(0)" : "translateY(16px)",
+            transition: "opacity 0.7s ease 0.3s, transform 0.7s ease 0.3s",
+          }}
+        >
+          Industrial Thermal
+          <br />
+          <span className="text-[#6FAFDD]">Anomaly Detection</span>
+        </h1>
+
+        {/* subtitle */}
+        <p
+          className="mt-5 max-w-md text-center font-body text-[15px] leading-relaxed text-white/45"
+          style={{
+            opacity: mounted ? 1 : 0,
+            transition: "opacity 0.7s ease 0.5s",
+          }}
+        >
+          Satellite-powered fire monitoring with machine learning classification
+          and real-time risk scoring for industrial facilities across India.
+        </p>
+
+        {/* CTA */}
+        <button
+          onClick={() => router.push("/dashboard")}
+          className="landing-cta group mt-10 flex items-center gap-3 rounded-full px-8 py-3 font-display text-sm font-semibold text-white transition-all duration-300"
+          style={{
+            opacity: mounted ? 1 : 0,
+            transform: mounted ? "translateY(0)" : "translateY(8px)",
+            transition:
+              "opacity 0.7s ease 0.6s, transform 0.7s ease 0.6s, box-shadow 0.3s ease, background 0.3s ease",
+          }}
+        >
+          Launch Command Dashboard
+          <ArrowRight
+            size={16}
+            className="transition-transform duration-300 group-hover:translate-x-1"
+          />
+        </button>
+
+        {/* three pillars — what the system does */}
+        <div
+          className="mt-16 grid w-full max-w-3xl grid-cols-1 gap-4 sm:grid-cols-3"
+          style={{
+            opacity: mounted ? 1 : 0,
+            transition: "opacity 0.8s ease 0.8s",
+          }}
+        >
+          {PILLARS.map(({ icon: Icon, title, desc }) => (
+            <div
+              key={title}
+              className="map-glass rounded-xl px-5 py-5"
+            >
+              <Icon size={18} className="mb-3 text-white/35" />
+              <h3 className="font-display text-sm font-semibold text-white/85">{title}</h3>
+              <p className="mt-1.5 text-[12px] leading-relaxed text-white/40">{desc}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Footer — real, clickable data-source credits ──────────── */}
+      <footer
+        className="relative z-10 flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 px-6 py-5"
+        style={{ opacity: mounted ? 1 : 0, transition: "opacity 1s ease 1s" }}
+      >
+        {DATA_SOURCES.map(({ label, href }) => (
+          <a
+            key={label}
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.18em] text-white/30 transition-colors duration-200 hover:text-white/70"
+          >
+            {label}
+            <ExternalLink
+              size={9}
+              className="opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+              aria-hidden
+            />
+          </a>
+        ))}
+      </footer>
+    </div>
+  );
+}

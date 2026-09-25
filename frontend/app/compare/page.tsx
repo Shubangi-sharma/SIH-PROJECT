@@ -61,7 +61,7 @@ interface CompareColumn {
   whatChanged: WhatChangedRowDto[];
 }
 
-const COMPARE_COLORS = ["#6E93BE", "#B99B5E", "#9186C4"];
+const COMPARE_COLORS = ["#5B9BD5", "#E0A84C", "#9186C4"];
 
 export default function ComparePage() {
   const { ids, hydrated, remove, clear } = useCompareIds();

@@ -137,7 +137,7 @@ export default function TimelineSlider({
         onChange={handleSliderChange}
         className="pyro-range h-1 flex-1"
         style={{
-          background: `linear-gradient(to right, #6E93BE ${((index ?? dates.length) / dates.length) * 100}%, #1A2028 0%)`,
+          background: `linear-gradient(to right, #5B9BD5 ${((index ?? dates.length) / dates.length) * 100}%, #1A2028 0%)`,
         }}
         aria-label="Timeline date"
       />

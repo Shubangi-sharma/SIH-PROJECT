@@ -10,8 +10,7 @@ import {
   X,
 } from "lucide-react";
 import FacilityDetailPanel from "./FacilityDetailPanel";
-import CellPanel from "./CellPanel";
-import HotspotHistoricalRisk from "./HotspotHistoricalRisk";
+
 import { FirmsHotspotDetail } from "./MapMarkerTooltips";
 import FreshnessBadge from "./FreshnessBadge";
 import { frpBandIndex } from "./MapCanvas";
@@ -40,9 +39,9 @@ import clsx from "clsx";
  *   3. "hotspot"  — pinned FIRMS detection: real sensor fields only (FRP,
  *                   brightness, confidence, coordinates, acquisition) via
  *                   FirmsHotspotDetail, plus the corroboration list.
- *   3b. "cell"    — an H3 cell click keeps its existing CellPanel (rendered
- *                   inside the pane, not as an overlay, so the map keeps one
- *                   persistent detail surface).
+ *   (The old "cell" state is gone: H3 cell ids meant nothing to map
+ *   readers, so background clicks now open the plain-language AreaPanel
+ *   rendered by the map page itself.)
  *
  * Layout: right pane (~380px) on `lg:`+ — the breakpoint the app's page grids
  * already use for major layout switches — and a bottom sheet below it. The
@@ -73,8 +72,7 @@ export type DetailDrawerSelection =
       onClose: () => void;
       onSelectFacility: (id: string) => void;
       onViewSatellite: () => void;
-    }
-  | { kind: "cell"; h3Cell: string; onClose: () => void };
+    };
 
 /* ------------------------------------------------------------------ */
 /* empty state — live viewport summary                                 */
@@ -343,7 +341,6 @@ const STATE_TITLE: Record<DetailDrawerSelection["kind"], string> = {
   empty: "Live summary",
   facility: "Facility detail",
   hotspot: "Hotspot detail",
-  cell: "Cell detail",
 };
 
 export default function DetailDrawer({
@@ -453,7 +450,7 @@ export default function DetailDrawer({
               </div>
               <div className="pyro-scroll min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
                 <FirmsHotspotDetail hotspot={selection.hotspot} />
-                <HotspotHistoricalRisk hotspot={selection.hotspot} />
+
                 <button
                   type="button"
                   onClick={selection.onViewSatellite}
@@ -513,13 +510,6 @@ export default function DetailDrawer({
                 )}
               </div>
             </>
-          )}
-
-          {/* 3b. H3 cell selected → existing CellPanel, wrapped */}
-          {selection.kind === "cell" && (
-            <div className="min-h-0 flex-1">
-              <CellPanel h3Cell={selection.h3Cell} onClose={selection.onClose} />
-            </div>
           )}
         </>
       )}

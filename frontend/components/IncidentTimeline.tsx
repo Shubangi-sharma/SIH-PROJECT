@@ -15,6 +15,10 @@ import clsx from "clsx";
  * shown by the replay controller — `0` is the newest event (list order),
  * while replay time counts UP from the oldest, so the mapping is inverted.
  * `null` = not replaying; no highlight.
+ *
+ * Readability makeover: every event is a self-contained card on a severity-
+ * tinted left rail, so scanning is by shape of the list, not by tracking a
+ * thin connector line. The newest event is badged "latest".
  */
 export default function IncidentTimeline({
   events,
@@ -27,18 +31,26 @@ export default function IncidentTimeline({
   className?: string;
 }) {
   return (
-    <section className={clsx("rounded-xl bg-bg-surface p-4", className)}>
-      <h3 className="flex items-center gap-1.5 font-display text-sm font-semibold text-text-primary">
+    <section className={clsx("dash-card rounded-xl p-4", className)}>
+      <div className="flex items-center gap-1.5">
         <ListVideo size={14} className="text-text-tertiary" aria-hidden />
-        Incident Timeline
-      </h3>
+        <h3 className="font-display text-sm font-semibold text-text-primary">
+          Incident Timeline
+        </h3>
+        {events.length > 0 && (
+          <span className="ml-auto rounded-full bg-bg-raised px-2 py-0.5 font-mono text-[10px] text-text-secondary">
+            {events.length} {events.length === 1 ? "event" : "events"}
+          </span>
+        )}
+      </div>
+
       {events.length === 0 ? (
         <p className="mt-3 rounded-lg border border-border-hairline bg-bg-raised px-3 py-2 text-xs leading-relaxed text-text-secondary">
           No detections in the stored history for this facility yet — the
           timeline fills in as FIRMS observations arrive.
         </p>
       ) : (
-        <ul className="mt-4 space-y-0">
+        <ul className="mt-3.5 space-y-1.5">
           {events.map((ev, i) => {
             const hex = statusColorHex(ev.severity);
             const active = activeIndex === i;
@@ -46,42 +58,52 @@ export default function IncidentTimeline({
               <li
                 key={`${ev.time}-${i}`}
                 className={clsx(
-                  "flex gap-3 rounded-lg transition-colors duration-200",
-                  active && "bg-accent-primary/10 ring-1 ring-inset ring-accent-primary/40",
+                  "relative flex flex-col gap-0.5 overflow-hidden rounded-lg border px-3 py-2 transition-all duration-200",
+                  active
+                    ? "border-accent-primary/50 bg-accent-primary/10"
+                    : "border-white/[0.04] bg-white/[0.015] hover:border-white/[0.09] hover:bg-white/[0.03]",
                 )}
                 aria-current={active ? "step" : undefined}
               >
-                {/* mono timestamp, left of the line */}
+                {/* severity rail */}
                 <span
-                  className={clsx(
-                    "w-[76px] flex-shrink-0 pt-0.5 text-right font-mono text-xs",
-                    active ? "text-accent-primary" : "text-text-tertiary",
-                  )}
-                >
-                  {ev.time}
-                </span>
-                {/* connecting line + node */}
-                <div className="relative w-[2px] flex-shrink-0 rounded bg-border-strong">
+                  aria-hidden
+                  className="absolute left-0 top-0 h-full w-[3px]"
+                  style={{ backgroundColor: hex, opacity: active ? 1 : 0.55 }}
+                />
+
+                <div className="flex items-center gap-2 pl-1.5">
+                  <StatusGlyph status={ev.severity} size={8} className="flex-shrink-0" />
+                  {/* mono timestamp — the anchor of each row */}
                   <span
                     className={clsx(
-                      "absolute left-1/2 top-1.5 h-2 w-2 -translate-x-1/2 rounded-full ring-2 ring-bg-surface transition-all duration-200",
-                      active && "h-3 w-3 top-1",
-                    )}
-                    style={{ backgroundColor: hex }}
-                  />
-                </div>
-                {/* event text, colour paired with shape glyph per §9 */}
-                <div className="flex items-start gap-1.5 py-1.5 pr-2 last:pb-0">
-                  <StatusGlyph status={ev.severity} size={8} className="mt-1.5 flex-shrink-0" />
-                  <span
-                    className={clsx(
-                      "font-body text-sm leading-snug",
-                      active ? "text-text-primary" : "text-text-primary/85",
+                      "font-mono text-[11px] font-medium",
+                      active ? "text-accent-primary" : "text-text-secondary",
                     )}
                   >
-                    {ev.text}
+                    {ev.time}
                   </span>
+                  {i === 0 && (
+                    <span className="rounded-full bg-accent-secondary/15 px-1.5 py-px font-mono text-[9px] uppercase tracking-wider text-accent-secondary">
+                      latest
+                    </span>
+                  )}
+                  {active && (
+                    <span className="rounded-full bg-accent-primary/20 px-1.5 py-px font-mono text-[9px] uppercase tracking-wider text-accent-primary">
+                      replaying
+                    </span>
+                  )}
                 </div>
+
+                {/* event text — own line, full width, comfortably readable */}
+                <span
+                  className={clsx(
+                    "pl-1.5 font-body text-[13px] leading-snug",
+                    active ? "text-text-primary" : "text-text-secondary",
+                  )}
+                >
+                  {ev.text}
+                </span>
               </li>
             );
           })}

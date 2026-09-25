@@ -95,10 +95,10 @@ export const STATUS_META: Record<
     tag: string;
   }
 > = {
-  normal: { label: "Normal", hex: "#5FA97C", shape: "dot", tag: "NML" },
-  watch: { label: "Watch", hex: "#B99B5E", shape: "diamond", tag: "WTC" },
-  suspicious: { label: "Suspicious", hex: "#C08A62", shape: "triangle", tag: "SUS" },
-  critical: { label: "Critical", hex: "#C26A6A", shape: "octagon", tag: "CRT" },
+  normal: { label: "Normal", hex: "#4ECBA0", shape: "dot", tag: "NML" },
+  watch: { label: "Watch", hex: "#E0A84C", shape: "diamond", tag: "WTC" },
+  suspicious: { label: "Suspicious", hex: "#E08A52", shape: "triangle", tag: "SUS" },
+  critical: { label: "Critical", hex: "#E06060", shape: "octagon", tag: "CRT" },
   unknown: { label: "Unknown", hex: "#5D6570", shape: "square", tag: "UNK" },
 };
 

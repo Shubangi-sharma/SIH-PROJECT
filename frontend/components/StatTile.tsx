@@ -5,6 +5,15 @@ import clsx from "clsx";
 import { RiskStatus } from "@/lib/types";
 import { StatusGlyph } from "@/lib/status";
 
+/** Maps tone to a CSS custom property for the gradient accent. */
+const ACCENT_MAP: Record<string, string> = {
+  critical: "rgba(224, 96, 96, 0.4)",
+  suspicious: "rgba(224, 138, 82, 0.35)",
+  watch: "rgba(224, 168, 76, 0.3)",
+  normal: "rgba(78, 203, 160, 0.3)",
+  default: "rgba(91, 155, 213, 0.3)",
+};
+
 export default function StatTile({
   label,
   value,
@@ -19,8 +28,18 @@ export default function StatTile({
   toneStatus?: RiskStatus;
   loading?: boolean;
 }) {
+  const accentColor =
+    ACCENT_MAP[tone ?? toneStatus ?? "default"] ?? ACCENT_MAP.default;
+
   return (
-    <div className="rounded-xl bg-bg-surface p-4">
+    <div
+      className="dash-card dash-stat rounded-xl p-4"
+      style={
+        {
+          "--stat-accent": accentColor,
+        } as React.CSSProperties
+      }
+    >
       <div
         className={clsx(
           "font-display text-[28px] font-semibold leading-none tracking-tight",

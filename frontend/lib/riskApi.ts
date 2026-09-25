@@ -69,7 +69,6 @@ export interface CellDetailResponse {
   classes: string[];
   meta: ResponseMeta;
 }
-
 /* ------------------------------------------------------------------ */
 /* fetchers                                                             */
 /* ------------------------------------------------------------------ */
@@ -92,6 +91,26 @@ async function fetchV1Json<T>(path: string): Promise<T> {
 /** GET /api/v1/cells/:h3 — one cell: risk + clusters (click-panel payload). */
 export function fetchCellDetail(h3Cell: string): Promise<CellDetailResponse> {
   return fetchV1Json<CellDetailResponse>(`/api/v1/cells/${encodeURIComponent(h3Cell)}`);
+}
+
+/**
+ * GET /api/v1/cells/by-point?lat=…&lng=… — same payload, resolved from
+ * coordinates so callers never need to compute or display an H3 index.
+ * Falls back to the cell-id route for older backends that lack the
+ * by-point alias.
+ */
+export async function fetchCellDetailByPoint(lat: number, lng: number): Promise<CellDetailResponse> {
+  const qs = new URLSearchParams({ lat: String(lat), lng: String(lng) });
+  try {
+    return await fetchV1Json<CellDetailResponse>(`/api/v1/cells/by-point?${qs.toString()}`);
+  } catch (err) {
+    // Older backend without the by-point alias — resolve the cell here and
+    // use the id route. h3-js is already a dependency of the map.
+    const { latLngToCell } = await import("h3-js");
+    const cell = latLngToCell(lat, lng, 7);
+    if (!cell) throw err;
+    return fetchCellDetail(cell);
+  }
 }
 
 /* ------------------------------------------------------------------ */

@@ -53,6 +53,32 @@ RISK_NOT_IMPLEMENTED_DETAIL = (
     "risk prediction requires the live H3 feature pipeline, not yet built (Phase 2C)"
 )
 
+# Domain-expert category risk weights for computing a composite risk score
+# from the classifier's probability distribution. Higher weight = category
+# is inherently more dangerous / demands faster response.
+CATEGORY_RISK_WEIGHTS: dict[str, float] = {
+    "Agricultural": 0.30,
+    "Forest_Vegetation": 0.55,
+    "Industrial": 0.85,
+    "Infrastructure_Energy": 0.70,
+    "Mining": 0.65,
+}
+
+
+def compute_classification_risk_score(probabilities: dict[str, float]) -> float:
+    """Weighted probability sum → 0-100 risk score from ML classification output.
+
+    Each predicted class has a domain-assigned risk weight. The composite score
+    is the sum of (probability × weight) across all classes, scaled to [0, 100].
+    This is NOT the GRU temporal risk model — it's a classification-derived proxy
+    that reflects how dangerous the predicted event category is.
+    """
+    score = sum(
+        prob * CATEGORY_RISK_WEIGHTS.get(cls, 0.5)
+        for cls, prob in probabilities.items()
+    )
+    return round(min(score * 100, 100.0), 2)
+
 
 class PredictRequest(BaseModel):
     latitude: float = Field(ge=-90, le=90)
@@ -120,7 +146,10 @@ async def predict_endpoint(
     except SchemaViolation as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    # ── 3. Persist hotspot + prediction + daily snapshot ────────────────────
+    # ── 3. Compute classification-derived risk score ─────────────────────
+    cls_risk_score = compute_classification_risk_score(result.probabilities)
+
+    # ── 4. Persist hotspot + prediction + daily snapshot ────────────────────
     created = await get_or_create_live_hotspot(
         session, latitude=body.latitude, longitude=body.longitude, region=body.region
     )
@@ -128,18 +157,18 @@ async def predict_endpoint(
         session,
         hotspot=created.hotspot,
         result=result,
-        risk_score=0.0,  # legacy scalar column; GRU risk signals need Phase 2C
+        risk_score=cls_risk_score,
         top_contributing_features=[],  # per-feature importances not exposed by the MLP
         source="live",
     )
     await record_timeline_snapshot(session, hotspot=created.hotspot, prediction=pred)
     await session.commit()
 
-    # ── 4. GenAI explanation (cached → LLM → template) ──────────────────────
+    # ── 5. GenAI explanation (cached → LLM → template) ──────────────────────
     explanation, explanation_provenance = await get_explanation(
         session,
         features=result.features,
-        risk_score=None,
+        risk_score=cls_risk_score,
         predicted_class=result.predicted_class,
         probabilities=result.probabilities,
         confidence=result.confidence,
@@ -164,7 +193,7 @@ async def predict_endpoint(
         # Contract-compat fields for the frontend's PredictionResponseDto:
         # explicit null / empty rather than absent keys, so no client can
         # mistake their absence for a bug (risk stays un-faked until Phase 2C).
-        "risk_score": None,
+        "risk_score": cls_risk_score,
         "top_contributing_features": [],
         "explanation": explanation,
         "explanation_provenance": explanation_provenance,
