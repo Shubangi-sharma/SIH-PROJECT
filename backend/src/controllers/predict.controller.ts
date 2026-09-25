@@ -11,6 +11,7 @@ import { Request, Response } from "express";
 import {
   proxyHotspots as forwardHotspots,
   proxyMlHealth as forwardMlHealth,
+  proxyObservations as forwardObservations,
   proxyPredict as forwardPredict,
 } from "../services/mlProxyService.js";
 import { httpLog } from "../lib/logger.js";
@@ -45,6 +46,30 @@ export async function proxyPredict(req: Request, res: Response): Promise<void> {
 export async function proxyHotspots(req: Request, res: Response): Promise<void> {
   try {
     const { status, body } = await forwardHotspots(req.url.includes("?") ? req.url.slice(req.url.indexOf("?") + 1) : "");
+    res.status(status).json(body);
+  } catch (err) {
+    httpLog.warn({ err: String(err), path: req.path }, "pyrosense_ml proxy failed");
+    res.status(502).json({
+      error: "ML service unavailable — is pyrosense_ml running (default http://localhost:5000)?",
+    });
+  }
+}
+
+/**
+ * GET /api/ml/observations?lat=…&lng=… — live environmental observations for
+ * one point (facility detail page's Land cover / Surroundings / Weather).
+ * Validation mirrors /predict's (finite numbers required); the body passes
+ * through unchanged so pyrosense_ml stays contract-owner.
+ */
+export async function proxyObservations(req: Request, res: Response): Promise<void> {
+  const lat = Number(req.query.lat);
+  const lng = Number(req.query.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    res.status(400).json({ error: "lat and lng are required as finite numbers" });
+    return;
+  }
+  try {
+    const { status, body } = await forwardObservations(lat, lng);
     res.status(status).json(body);
   } catch (err) {
     httpLog.warn({ err: String(err), path: req.path }, "pyrosense_ml proxy failed");

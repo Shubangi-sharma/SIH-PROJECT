@@ -11,6 +11,7 @@ backend proxies it (pass-through, no reshaping):
 | `POST` JSON `{ latitude, longitude, region? }` | `POST /api/predict` | `POST /predict` |
 | `GET` | `GET /api/ml/hotspots` | `GET /hotspots` |
 | `GET` | `GET /api/ml/health` | `GET /health` |
+| `GET ?lat=…&lng=…` | `GET /api/ml/observations` | `GET /observations` |
 
 **Modes.** Auto mode (frontend default): only `latitude`/`longitude` (plus an
 optional `region` tag); pyrosense_ml engineers the other 35 features from
@@ -114,3 +115,51 @@ leakage column / missing feature / bad land-cover value),
 
 `{ status, service, model_loaded, postgres_connected, model_version,
 dataset_version, feature_schema_version, feature_count }`.
+
+## `GET /api/ml/observations?lat=…&lng=…` — live per-point environment
+
+Computed on demand by the same feature modules as `/predict` (land cover,
+OSM distances, weather — fetched in parallel), but nothing is persisted and
+no inference runs. Unknown values are `null` — render "—", never coerce
+to 0.
+
+```json
+{
+  "latitude": 30.7333,
+  "longitude": 76.7794,
+  "land_cover": {
+    "ratios": { "water": 0.01, "trees": 0.08, "grass": 0.04,
+                "flooded_vegetation": 0.0, "crops": 0.05,
+                "shrub_and_scrub": 0.02, "built": 0.7, "bare": 0.1,
+                "snow_and_ice": 0.0 },
+    "dominant": "built",
+    "observations": 42.0,
+    "vegetation_ratio": 0.19,
+    "provenance": "osm_derived | cache | unavailable"
+  },
+  "surroundings": {
+    "distances_km": { "industrial": 1.2, "power": 14.0, "mining": null,
+                      "fuel": 3.6, "transport": 5.1, "agriculture": 33.0 },
+    "proximity_flags": { "industrial": true, "power": false, "mining": null,
+                         "fuel": true, "transport": false, "agriculture": false },
+    "provenance": "overpass | cache | unavailable"
+  },
+  "weather": {
+    "mean_temperature_c": 28.4, "max_temperature_c": 36.1,
+    "mean_dewpoint_c": 18.0, "mean_relative_humidity": 62.5,
+    "min_relative_humidity": 31.0, "mean_wind_speed_ms": 2.5,
+    "max_wind_speed_ms": 6.0, "total_precipitation": 120.0,
+    "mean_precipitation": 4.0, "mean_ssrd": 190.5, "max_ssrd": 880.0,
+    "observation_count": 30.0, "lookback_days": 30,
+    "provenance": "open-meteo | cache | unavailable"
+  },
+  "warnings": [],
+  "note": "Observations are computed on demand…",
+  "data_timestamp": "2026-09-20T10:00:00+00:00"
+}
+```
+
+Errors: `400` (backend: non-numeric lat/lng), `502` (pyrosense_ml
+unreachable). Each block degrades independently — one dead source never
+fails the response; its provenance becomes `unavailable` and a warning is
+appended.

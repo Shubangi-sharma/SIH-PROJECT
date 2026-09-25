@@ -61,6 +61,11 @@ export function getAnalyses(req: Request, res: Response): void {
     return analyzeAllFacilities(new Date(), bboxObj);
   });
 
+  // Same contract as the firms CSV route: the browser may reuse the response
+  // for 5 minutes, so showcase page-to-page navigations hit the network only
+  // when SWR's own revalidation actually needs data. The TTL mirrors the
+  // analysis cache; ingestion invalidation keeps it correct server-side.
+  res.setHeader("Cache-Control", "public, max-age=300");
   json(res, 200, {
     analyses,
     count: analyses.length,

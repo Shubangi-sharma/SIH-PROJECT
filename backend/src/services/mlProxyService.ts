@@ -69,6 +69,15 @@ export function proxyHotspots(query: string): Promise<MlProxyResult> {
   return forward(`/hotspots${qs}`);
 }
 
+/**
+ * GET /observations?lat=…&lng=… — live land-cover / surroundings / weather
+ * for one point. Same engineering modules as /predict, but display-shaped:
+ * nothing persisted, no inference, unknowns are null (never 0.0 priors).
+ */
+export function proxyObservations(lat: number, lng: number): Promise<MlProxyResult> {
+  return forward(`/observations?lat=${encodeURIComponent(String(lat))}&lng=${encodeURIComponent(String(lng))}`);
+}
+
 /** GET /health — pyrosense_ml model/DB status. */
 export function proxyMlHealth(): Promise<MlProxyResult> {
   return forward("/health");

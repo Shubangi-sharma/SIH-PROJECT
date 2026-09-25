@@ -170,3 +170,77 @@ async def test_partial_osm_success_backfills_missing_categories(monkeypatch):
     assert set(out.features) == set(CLASSIFIER_FEATURES)
     assert out.features["distance_to_mining_km"] == 0.0  # training median
     assert out.features["distance_to_fuel_km"] == 0.0  # renamed + backfilled
+
+
+@pytest.mark.asyncio
+async def test_proximity_flags_derived_from_real_distances(monkeypatch):
+    """near_* flags come from the Overpass distances, not hardcoded 0.0.
+
+    Thresholds: industrial 500 m, fuel 2 km, power 1 km, mining 5 km.
+    """
+    osm = OsmDistances(
+        distances={
+            "distance_to_industrial_km": 0.3,  # within 500 m → 1
+            "distance_to_power_km": 14.0,      # beyond 1 km → 0
+            "distance_to_mining_km": None,     # unknown → prior 0
+            "distance_to_fuel_storage_km": 1.5,  # within 2 km → 1
+            "distance_to_transport_km": 5.1,   # beyond 1 km → 0
+            "distance_to_agriculture_km": 33.0,
+        },
+        cached=False,
+    )
+    _patch_modules(monkeypatch, osm, _lc_success(), _weather_success())
+    out = await eng.engineer_features(28.6, 77.2)
+    assert out.features["near_industrial_500m"] == 1.0
+    assert out.features["near_fuel_2km"] == 1.0
+    assert out.features["near_power_1km"] == 0.0
+    assert out.features["near_transport_1km"] == 0.0
+    assert out.features["near_agriculture_1km"] == 0.0
+    assert out.features["near_mining_5km"] == 0.0  # unknown distance → prior
+
+
+@pytest.mark.asyncio
+async def test_new_weather_keys_flow_through(monkeypatch):
+    """RH / ssrd / window extremes reach the frozen schema with real values."""
+    wx = Weather(
+        features={
+            **{k: None for k in WEATHER_FEATURES},
+            "mean_temperature": 28.4,
+            "max_temperature": 36.1,
+            "min_temperature": 22.0,
+            "mean_relative_humidity": 62.5,
+            "min_relative_humidity": 31.0,
+            "mean_ssrd": 190.5,
+            "max_ssrd": 880.0,
+            "weather_observations": 30.0,
+        },
+        provenance="open-meteo",
+    )
+    _patch_modules(monkeypatch, _osm_success(), _lc_success(), wx)
+    out = await eng.engineer_features(28.6, 77.2)
+    assert out.features["mean_relative_humidity"] == 62.5
+    assert out.features["min_relative_humidity"] == 31.0
+    assert out.features["mean_ssrd"] == 190.5
+    assert out.features["max_ssrd"] == 880.0
+    assert out.features["max_temperature_c"] == 36.1
+    # provenance is not median_fallback — the weather block is real now
+    assert out.provenance["weather"] == "open-meteo"
+    assert not any("weather unavailable" in w for w in out.warnings)
+
+
+@pytest.mark.asyncio
+async def test_module_crash_degrades_its_block_only(monkeypatch):
+    """A crashed fetch (gather with return_exceptions) degrades one block."""
+
+    async def _osm_boom(lat, lng):
+        raise RuntimeError("overpass exploded")
+
+    monkeypatch.setattr(eng, "get_osm_distances", _osm_boom)
+    _patch_modules_order_preserved = True  # noqa: F841 — clarity only
+    monkeypatch.setattr(eng, "get_land_cover", lambda lat, lng: _awaitable(_lc_success()))
+    monkeypatch.setattr(eng, "get_weather", lambda lat, lng: _awaitable(_weather_success()))
+    out = await eng.engineer_features(28.6, 77.2)
+    assert set(out.features) == set(CLASSIFIER_FEATURES)
+    assert out.provenance["osm"] == "median_fallback"
+    assert out.provenance["weather"] == "open-meteo"
+    assert any("OSM distances unavailable" in w for w in out.warnings)

@@ -118,5 +118,8 @@ export async function getCommand(req: Request, res: Response): Promise<void> {
     return { ...stats, priorityList };
   });
 
+  // The command view refreshes on a 30s poll client-side; short browser
+  // caching keeps showcase navigation instant without hiding fresh data.
+  res.setHeader("Cache-Control", "public, max-age=30");
   res.status(200).json(result);
 }

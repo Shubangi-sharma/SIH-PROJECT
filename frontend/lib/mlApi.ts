@@ -78,6 +78,13 @@ export interface ContributingFeatureDto {
  */
 export interface PredictionResponseDto {
   hotspot_id: string;
+  /**
+   * Analyzed coordinates, echoed from the request. Always present on values
+   * returned by postPredict — it backfills them from the submitted request
+   * when an older service build omits the echo.
+   */
+  latitude: number;
+  longitude: number;
   /** Predicted Hotspot Category — one of MODEL_CLASSES. */
   class: ModelClass;
   probabilities: Record<ModelClass, number>;
@@ -125,6 +132,86 @@ export interface MlHotspotSummaryDto {
 export interface MlHotspotsResponseDto {
   count: number;
   hotspots: MlHotspotSummaryDto[];
+}
+
+/* ------------------------------------------------------------------ */
+/* observations (GET /api/ml/observations — live per-point environment)  */
+/* ------------------------------------------------------------------ */
+
+/** Land-cover ratios per class; null when the source had no data. */
+export interface LandCoverBlockDto {
+  ratios: Record<string, number | null>;
+  dominant: string | null;
+  observations: number | null;
+  vegetation_ratio: number | null;
+  provenance: string;
+}
+
+/** Six nearest-infrastructure distances + 0/1 proximity flags. */
+export interface SurroundingsBlockDto {
+  distances_km: Record<string, number | null>;
+  proximity_flags: Record<string, boolean | null>;
+  provenance: string;
+}
+
+/** Weather aggregates over the lookback window; null = source gap. */
+export interface WeatherBlockDto {
+  mean_temperature_c: number | null;
+  max_temperature_c: number | null;
+  mean_dewpoint_c: number | null;
+  mean_relative_humidity: number | null;
+  min_relative_humidity: number | null;
+  mean_wind_speed_ms: number | null;
+  max_wind_speed_ms: number | null;
+  total_precipitation: number | null;
+  mean_precipitation: number | null;
+  mean_ssrd: number | null;
+  max_ssrd: number | null;
+  observation_count: number | null;
+  lookback_days: number;
+  provenance: string;
+}
+
+/**
+ * GET /api/ml/observations response — live land cover / surroundings /
+ * weather for one point, computed on demand by pyrosense_ml's feature
+ * modules (nothing persisted, no inference). `null` values are real source
+ * gaps — render "—", never coerce to 0.
+ */
+export interface ObservationsResponseDto {
+  latitude: number;
+  longitude: number;
+  land_cover: LandCoverBlockDto;
+  surroundings: SurroundingsBlockDto;
+  weather: WeatherBlockDto;
+  warnings: string[];
+  note: string;
+  data_timestamp: string;
+}
+
+/**
+ * GET /api/ml/observations?lat=…&lng=… — live environmental observations.
+ * External sources are queried upstream with per-block caching, so repeated
+ * calls for nearby points are cheap.
+ */
+export async function fetchObservations(
+  lat: number,
+  lng: number,
+): Promise<ObservationsResponseDto> {
+  const qs = new URLSearchParams({ lat: String(lat), lng: String(lng) });
+  const res = await fetch(`${ML_PROXY_BASE}/api/ml/observations?${qs.toString()}`);
+  if (!res.ok) {
+    let detail = `ML proxy ${res.status} for /api/ml/observations`;
+    try {
+      const body = (await res.json()) as { error?: string; detail?: unknown };
+      if (typeof body.error === "string") detail = body.error;
+      else if (Array.isArray(body.detail)) detail = body.detail.map((d) => JSON.stringify(d)).join("; ");
+    } catch {
+      /* keep the generic detail */
+    }
+    throw new MlApiError(res.status, detail);
+  }
+  return (await res.json()) as ObservationsResponseDto;
 }
 
 /* ------------------------------------------------------------------ */
@@ -184,7 +271,22 @@ export async function postPredict(
     }
     throw new MlApiError(res.status, detail);
   }
-  return (await res.json()) as PredictionResponseDto;
+  // Normalize before the cast: this function OWNS the PredictionResponseDto
+  // invariant. The coordinate echo was added to pyrosense_ml later, so older
+  // running builds may omit it — backfill from the submitted request. Other
+  // collection fields the result page dereferences are defaulted so a
+  // degraded/older payload degrades the UI, never crashes it.
+  const raw = (await res.json()) as Partial<PredictionResponseDto>;
+  return {
+    ...raw,
+    latitude: typeof raw.latitude === "number" ? raw.latitude : latitude,
+    longitude: typeof raw.longitude === "number" ? raw.longitude : longitude,
+    probabilities: raw.probabilities ?? ({} as PredictionResponseDto["probabilities"]),
+    warnings: raw.warnings ?? [],
+    top_contributing_features: raw.top_contributing_features ?? [],
+    feature_provenance: raw.feature_provenance ?? {},
+    prediction_timestamp: raw.prediction_timestamp ?? new Date().toISOString(),
+  } as PredictionResponseDto;
 }
 
 /** GET /api/ml/hotspots — stored hotspots (historical seed + live predicts). */

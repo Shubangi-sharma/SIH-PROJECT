@@ -11,13 +11,15 @@ Phase 2A orchestration contract:
   land_cover_observations-style counters; instead it wants fire counts over an
   H3-r7 cell, brightness temperatures, boolean proximity flags, and an
   lc_vegetation_ratio aggregate.
-- KNOWN GAP (documented): mean/min relative humidity and mean/max solar
-  radiation (ssrd) have no live source in this service yet (Open-Meteo archive
-  daily vars do not include them) — they fall back to the training prior 0.0
-  with provenance "median_fallback", flagged in warnings. Wiring a real
-  source is future work alongside the Phase 2C pipeline.
+- Relative humidity (hourly series) and solar radiation (hourly
+  shortwave_radiation) are derived from Open-Meteo by features/weather.py;
+  on any hourly failure they fall back to the training prior 0.0 with
+  provenance "median_fallback", flagged in warnings.
 - Weather features keep their Open-Meteo sources under new names
   (mean_temperature_c etc.); provenance flags any unavailable block.
+- The three external feature blocks (OSM distances, land cover, weather)
+  run CONCURRENTLY — a fresh point costs roughly the slowest single fetch,
+  not the sum of all three.
 
 NOTE: risk-model (GRU) features are NOT built here — scoring a (30, 17)
 sequence is Phase 2C's job.
@@ -25,6 +27,7 @@ sequence is Phase 2C's job.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sqlite3
 from dataclasses import dataclass, field
@@ -96,9 +99,33 @@ async def engineer_features(
         )
         out.features.update(det)
 
-    # ── 2. OSM distances ────────────────────────────────────────────────────
-    osm = await get_osm_distances(latitude, longitude)
-    if all(v is None for v in osm.distances.values()):
+    # ── 2/3/4. OSM distances ∥ land cover ∥ weather (concurrent) ────────────
+    # The three external fetches are independent — run them together so a
+    # fresh point costs ~max(fetches) instead of ~sum(fetches).
+    osm_res, lc_res, wx_res = await asyncio.gather(
+        get_osm_distances(latitude, longitude),
+        get_land_cover(latitude, longitude),
+        get_weather(latitude, longitude),
+        return_exceptions=True,
+    )
+    if isinstance(osm_res, BaseException):
+        logger.warning("OSM distances fetch crashed: %s", osm_res)
+        osm = None
+    else:
+        osm = osm_res
+    if isinstance(lc_res, BaseException):
+        logger.warning("land cover fetch crashed: %s", lc_res)
+        lc = None
+    else:
+        lc = lc_res
+    if isinstance(wx_res, BaseException):
+        logger.warning("weather fetch crashed: %s", wx_res)
+        wx = None
+    else:
+        wx = wx_res
+
+    # ── 2. OSM distances + proximity flags ──────────────────────────────────
+    if osm is None or all(v is None for v in osm.distances.values()):
         out.warnings.append("OSM distances unavailable — median fallback applied")
         out.provenance["osm"] = "median_fallback"
         dist = {k: CLASSIFIER_TRAINING_MEDIANS[k] for k in OSM_FEATURES}
@@ -113,15 +140,19 @@ async def engineer_features(
         for k in OSM_FEATURES:
             dist.setdefault(k, CLASSIFIER_TRAINING_MEDIANS[k])
     out.features.update(dist)
+    # Proximity flags derive from the REAL distances when Overpass answered
+    # (par with training); unknown distances leave the flag at the 0.0 prior.
+    out.features.update(_proximity_flags(osm.distances if osm is not None else None))
 
     # ── 3. Land cover ───────────────────────────────────────────────────────
-    lc = await get_land_cover(latitude, longitude)
-    if lc.features.get("lc_built_ratio") is None:
+    if lc is None or lc.features.get("lc_built_ratio") is None:
         out.warnings.append("land cover derived without observations — prior fallback")
         out.provenance["land_cover"] = "median_fallback"
+        lc_features: dict[str, object] = dict(lc.features) if lc is not None else {}
     else:
         out.provenance["land_cover"] = lc.provenance
-    lc_mapped = _map_land_cover(lc.features)
+        lc_features = lc.features
+    lc_mapped = _map_land_cover(lc_features)
     # The OSM-derived source has no snow/ice class (and a failed fetch has no
     # rows at all) — guarantee every lc_* schema key exists. snow/ice falls
     # back to the 0.0 training prior, which is also its real-world prior for
@@ -131,16 +162,16 @@ async def engineer_features(
     out.features.update(lc_mapped)
 
     # ── 4. Weather ──────────────────────────────────────────────────────────
-    wx = await get_weather(latitude, longitude)
-    if wx.provenance == "unavailable":
+    if wx is None or wx.provenance == "unavailable":
         out.warnings.append("weather unavailable — median fallback applied")
         out.provenance["weather"] = "median_fallback"
         weather = {k: CLASSIFIER_TRAINING_MEDIANS[k] for k in CLASSIFIER_WEATHER_FEATURES}
     else:
         out.provenance["weather"] = wx.provenance
-        filled = dict(wx.features)
-        _fill_medians(filled, WEATHER_FEATURES)
-        weather = _map_weather(filled)
+        # _map_weather skips None values and setdefaults every classifier
+        # weather key to its training median — partial weather (e.g. hourly
+        # RH/irradiance failing while daily succeeds) degrades per-feature.
+        weather = _map_weather(dict(wx.features))
     out.features.update(weather)
 
     # ── Final guard: all 43 features present, no None ────────────────────────
@@ -181,6 +212,39 @@ OSM_FEATURES = [
     "distance_to_transport_km",
     "distance_to_agriculture_km",
 ]
+
+# Proximity flag → (distance feature, threshold in metres). Flags are 1.0
+# when the category's nearest distance is within the threshold, else 0.0;
+# when the distance is unknown the flag stays at its 0.0 training prior.
+PROXIMITY_RULES: dict[str, tuple[str, float]] = {
+    "near_industrial_500m": ("distance_to_industrial_km", 500.0),
+    "near_power_1km": ("distance_to_power_km", 1000.0),
+    "near_mining_5km": ("distance_to_mining_km", 5000.0),
+    "near_fuel_2km": ("distance_to_fuel_km", 2000.0),
+    "near_transport_1km": ("distance_to_transport_km", 1000.0),
+    "near_agriculture_1km": ("distance_to_agriculture_km", 1000.0),
+}
+
+
+def _proximity_flags(
+    module_distances: dict[str, float | None] | None,
+) -> dict[str, float]:
+    """0/1 proximity flags from the Overpass module's raw distances.
+
+    Distances arrive under the module's own names (fuel-storage era naming),
+    so thresholds are resolved through _OSM_RENAME. Unknown distance → 0.0
+    (the training prior — matches the previous always-0 behaviour without
+    inventing proximity that was never observed).
+    """
+    flags: dict[str, float] = {}
+    for flag, (dist_feature, threshold_m) in PROXIMITY_RULES.items():
+        module_key = next(
+            (m for m, renamed in _OSM_RENAME.items() if renamed == dist_feature),
+            dist_feature,
+        )
+        v = (module_distances or {}).get(module_key)
+        flags[flag] = 1.0 if (v is not None and float(v) * 1000.0 <= threshold_m) else 0.0
+    return flags
 # The Overpass module's fuel category is named after the OLD GBM schema
 # (distance_to_fuel_storage_km); the frozen classifier schema wants
 # distance_to_fuel_km. Renamed here so the vector matches the schema exactly.
@@ -204,16 +268,21 @@ CLASSIFIER_WEATHER_FEATURES = [
 
 # Open-Meteo archive provides daily temperature/wind/dewpoint/precipitation
 # under the OLD GBM-era names; remap them onto the classifier's names.
-# relative humidity and solar radiation have no archive daily source here —
-# they stay at their 0.0 training prior (documented gap).
+# Relative humidity (hourly series) and solar radiation (hourly
+# shortwave_radiation) are derived by features/weather.py; a failed hourly
+# fetch leaves them at their 0.0 training prior via _fill_medians.
 _WEATHER_RENAME = {
     "mean_temperature": "mean_temperature_c",
     "max_temperature": "max_temperature_c",
     "mean_dewpoint": "mean_dewpoint_c",
+    "mean_relative_humidity": "mean_relative_humidity",
+    "min_relative_humidity": "min_relative_humidity",
     "mean_wind_speed": "mean_wind_speed_ms",
     "max_wind_speed": "max_wind_speed_ms",
     "total_precipitation": "total_precipitation",
     "mean_precipitation": "mean_precipitation",
+    "mean_ssrd": "mean_ssrd",
+    "max_ssrd": "max_ssrd",
     "weather_observations": "weather_observation_count",
 }
 

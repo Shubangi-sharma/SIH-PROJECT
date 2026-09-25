@@ -9,7 +9,7 @@
 import { Router } from "express";
 import express from "express";
 import rateLimit from "express-rate-limit";
-import { proxyMlHealth, proxyHotspots, proxyPredict } from "../controllers/predict.controller.js";
+import { proxyMlHealth, proxyHotspots, proxyObservations, proxyPredict } from "../controllers/predict.controller.js";
 
 /** Predictions trigger real compute + GenAI — tighter bucket than general API. */
 const predictLimiter = rateLimit({
@@ -25,3 +25,5 @@ predictRouter.use(express.json({ limit: "64kb" }));
 predictRouter.post("/api/predict", predictLimiter, proxyPredict);
 predictRouter.get("/api/ml/health", proxyMlHealth);
 predictRouter.get("/api/ml/hotspots", proxyHotspots);
+/** Observations are cached upstream + rate-limited like predict (real fetches). */
+predictRouter.get("/api/ml/observations", predictLimiter, proxyObservations);

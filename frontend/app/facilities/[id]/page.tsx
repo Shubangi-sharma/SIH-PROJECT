@@ -11,6 +11,7 @@ import HealthScoreRing from "@/components/HealthScoreRing";
 import WhatChangedPanel from "@/components/WhatChangedPanel";
 import AiSummaryBlock from "@/components/AiSummaryBlock";
 import IncidentTimeline from "@/components/IncidentTimeline";
+import ObservationsPanels from "@/components/ObservationsPanels";
 import { fetchFacilityAnalysis, fetchSummary } from "@/lib/api";
 import { FacilityNarrative, RiskStatus } from "@/lib/types";
 import type { FacilityAnalysisResponseDto, SummaryResponseDto } from "@/lib/api";
@@ -308,25 +309,11 @@ export default function FacilityDetailPage() {
               />
             </FieldGroupSection>
 
-            {/* PDF §4: Land cover + Surroundings — six ratios / six distances.
-                These are engineered per-point during ML prediction (not
-                stored per facility), so the honest state is a pointer to the
-                Predict page — never fabricated numbers (info.md rule). */}
-            <FieldGroupSection
-              title="Land cover"
-              note="Six Dynamic Earth land-cover ratios around the point."
-              empty
-            />
-            <FieldGroupSection
-              title="Surroundings"
-              note="Distances to industrial, power, mining, fuel-storage, agriculture and transport infrastructure."
-              empty
-            />
-            <FieldGroupSection
-              title="Weather"
-              note="Temperature, wind, dewpoint, precipitation and solar radiation aggregates."
-              empty
-            />
+            {/* PDF §4: Land cover + Surroundings + Weather — computed LIVE by
+                the ML service's feature modules (GET /observations via the
+                backend proxy). Unknowns render as "—", never fabricated
+                numbers (info.md rule). */}
+            <ObservationsPanels lat={facility.lat} lng={facility.lng} />
 
             <AiSummaryBlock
               text={summary?.text ?? "Generating grounded summary…"}

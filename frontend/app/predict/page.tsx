@@ -4,17 +4,21 @@
  * Predict page — Hotspot Classification (SIH brief §6–§9).
  *
  * Collects ONLY the brief's recommended fields (lat, lng, optional region
- * tag); every one of the 36 model features is engineered server-side by
- * pyrosense_ml's auto mode. The 4-class result renders under the exact
- * "Predicted Hotspot Category" heading, visually distinct from the
- * monitoring backend's rule-based Risk Status vocabulary.
+ * tag); every model feature is engineered server-side by pyrosense_ml's
+ * auto mode. The result renders under the exact "Predicted Hotspot
+ * Category" heading, visually distinct from the monitoring backend's
+ * rule-based Risk Status vocabulary.
+ *
+ * Real-time mode: a valid coordinate pair auto-classifies (debounced) —
+ * no button press required. A stale-response guard (monotonic request id)
+ * keeps the rendered result equal to the latest submitted coordinates.
  *
  * Data flow (§7): form → backend proxy → pyrosense_ml feature engineering →
  * same preprocessing → model → prediction + explanation → this result view.
  * No mock numbers: every value shown comes from the response.
  */
 
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -42,55 +46,58 @@ import {
   featureLabel,
 } from "@/lib/features";
 
-/** Number-only input supporting blank state + validation (§10). */
-function NumberField({
-  label,
-  hint,
+/**
+ * One coordinate box — "lat, lng" in a single field (§6 fields unchanged:
+ * latitude and longitude are still the only required inputs). Latitude
+ * first, strict validation, and a live preview of the parsed pair.
+ */
+function CoordinatesField({
   value,
   onChange,
-  placeholder,
-  min,
-  max,
-  step = "any",
-  required,
   error,
+  parsed,
 }: {
-  label: string;
-  hint?: string;
   value: string;
   onChange: (v: string) => void;
-  placeholder?: string;
-  min?: number;
-  max?: number;
-  step?: string;
-  required?: boolean;
-  error?: string | null;
+  error: string | null;
+  parsed: { lat: number; lng: number } | null;
 }) {
   return (
-    <label className="block">
-      <span className="flex items-baseline gap-2">
+    <div>
+      <div className="flex items-baseline justify-between">
         <span className="text-[11px] font-semibold uppercase tracking-widest text-text-tertiary">
-          {label}
-          {required && <span className="ml-1 text-status-suspicious">*</span>}
+          Coordinates
+          <span className="ml-1 text-status-suspicious">*</span>
         </span>
-        {hint && <span className="text-[10px] text-text-tertiary">{hint}</span>}
-      </span>
-      <input
-        type="number"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        min={min}
-        max={max}
-        step={step}
-        aria-invalid={!!error}
+        <span className="text-[10px] text-text-tertiary">latitude, longitude</span>
+      </div>
+      <div
         className={clsx(
-          "mt-1.5 w-full rounded-lg border bg-bg-inset px-3 py-2 font-mono text-sm text-text-primary outline-none transition-colors duration-150 placeholder:text-text-tertiary",
-          error ? "border-status-critical" : "border-border-hairline focus:border-accent-primary",
+          "mt-1.5 flex items-center rounded-lg border bg-bg-inset transition-colors duration-150",
+          error ? "border-status-critical" : "border-border-hairline focus-within:border-accent-primary",
         )}
-      />
-      {error && <span className="mt-1 block text-[11px] text-status-critical">{error}</span>}
-    </label>
+      >
+        <MapPin size={14} className="ml-3 flex-shrink-0 text-text-tertiary" />
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="30.7333, 76.7794"
+          aria-label="Coordinates as latitude, longitude"
+          aria-invalid={!!error}
+          autoComplete="off"
+          spellCheck={false}
+          className="w-full bg-transparent px-2.5 py-2 font-mono text-sm text-text-primary outline-none placeholder:text-text-tertiary"
+        />
+      </div>
+      {error ? (
+        <span className="mt-1 block text-[11px] text-status-critical">{error}</span>
+      ) : parsed ? (
+        <span className="mt-1 block font-mono text-[11px] text-text-tertiary">
+          {parsed.lat.toFixed(4)}°, {parsed.lng.toFixed(4)}° — classifying automatically…
+        </span>
+      ) : null}
+    </div>
   );
 }
 
@@ -282,65 +289,78 @@ function MonoStat({ label, value }: { label: string; value: string }) {
 }
 
 export default function PredictPage() {
-  // ── form state: only the brief's §6 recommended fields ──────────────────
-  const [latitude, setLatitude] = useState("");
-  const [longitude, setLongitude] = useState("");
+  // ── form state: one coordinate box + optional region tag ────────────────
+  const [coords, setCoords] = useState("");
   const [region, setRegion] = useState("india");
 
   // ── request lifecycle: idle | submitting | done | error ─────────────────
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<PredictionResponseDto | null>(null);
+  // Monotonic request id — only the newest request may render a result.
+  const requestSeq = React.useRef(0);
 
-  const validation = useMemo(() => {
-    const lat = Number(latitude);
-    const lng = Number(longitude);
-    return {
-      lat: latitude.trim() === ""
-        ? requiredMsg
-        : !Number.isFinite(lat) || lat < -90 || lat > 90
-          ? "Latitude must be between −90 and 90."
-          : null,
-      lng: longitude.trim() === ""
-        ? requiredMsg
-        : !Number.isFinite(lng) || lng < -180 || lng > 180
-          ? "Longitude must be between −180 and 180."
-          : null,
-      latNum: lat,
-      lngNum: lng,
-    };
-  }, [latitude, longitude]);
+  /** Parse "lat, lng" (comma or whitespace separated, both signed). */
+  const parsed = useMemo<{ lat: number; lng: number } | null>(() => {
+    const m = coords.trim().match(/^(-?\d+(?:\.\d+)?)\s*[,\s]\s*(-?\d+(?:\.\d+)?)$/);
+    if (!m) return null;
+    const lat = Number(m[1]);
+    const lng = Number(m[2]);
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90) return null;
+    if (!Number.isFinite(lng) || lng < -180 || lng > 180) return null;
+    return { lat, lng };
+  }, [coords]);
 
-  const canSubmit = !submitting && validation.lat === null && validation.lng === null;
+  const validationError = useMemo(() => {
+    if (coords.trim() === "") return null; // idle state — not an error
+    if (!parsed) return "Enter latitude, longitude (e.g. 30.7333, 76.7794).";
+    return null;
+  }, [coords, parsed]);
 
-  const handleSubmit = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!canSubmit) return;
+  const runPredict = useCallback(
+    async (lat: number, lng: number) => {
+      const seq = ++requestSeq.current;
       setSubmitting(true);
       setError(null);
-      setResult(null);
       try {
-        const r = await postPredict(validation.latNum, validation.lngNum, region || undefined);
-        setResult(r);
+        const r = await postPredict(lat, lng, region || undefined);
+        if (seq === requestSeq.current) setResult(r);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Prediction request failed.");
+        if (seq === requestSeq.current) {
+          setError(err instanceof Error ? err.message : "Prediction request failed.");
+          setResult(null);
+        }
       } finally {
-        setSubmitting(false);
+        if (seq === requestSeq.current) setSubmitting(false);
       }
     },
-    [canSubmit, region, validation.latNum, validation.lngNum],
+    [region],
+  );
+
+  // ── real time: valid coordinates auto-classify (debounced 700 ms) ──────
+  useEffect(() => {
+    if (!parsed) return;
+    const t = setTimeout(() => void runPredict(parsed.lat, parsed.lng), 700);
+    return () => clearTimeout(t);
+  }, [parsed, runPredict]);
+
+  const handleSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      if (parsed) void runPredict(parsed.lat, parsed.lng);
+    },
+    [parsed, runPredict],
   );
 
   const reset = useCallback(() => {
+    requestSeq.current += 1; // invalidate any in-flight auto-classify
+    setSubmitting(false);
     setResult(null);
     setError(null);
   }, []);
 
-  /** Show the map-crosshair convenience without leaving the form. */
+  /** Paste helper — keep the full form visible; the map documents the workflow. */
   const useMapCoordinates = useCallback(() => {
-    // Coordinates must come from the user (or a hotspot they clicked on the
-    // Live Map) — this button documents the workflow instead of inventing one.
     window.open("/map", "_blank");
   }, []);
 
@@ -352,10 +372,10 @@ export default function PredictPage() {
             Hotspot Classification
           </h1>
           <p className="mt-1 max-w-3xl text-sm leading-relaxed text-text-secondary">
-            Submit a hotspot&apos;s location and the ML service engineers all 36
-            model features — detection persistence, FRP statistics, distances to
-            infrastructure, land cover, weather — then classifies it into one of
-            five categories with a grounded explanation. Feature engineering and
+            Submit a hotspot&apos;s location and the ML service engineers the
+            full model feature vector — detection persistence, FRP statistics,
+            distances to infrastructure, land cover, weather — then classifies
+            it with a grounded explanation. Feature engineering and
             preprocessing happen entirely server-side.
           </p>
         </header>
@@ -367,35 +387,14 @@ export default function PredictPage() {
               Hotspot input
             </h2>
             <form className="mt-4 flex flex-col gap-4" onSubmit={handleSubmit} noValidate>
-              <NumberField
-                label="Latitude"
-                hint="−90 … 90"
-                required
-                value={latitude}
+              <CoordinatesField
+                value={coords}
                 onChange={(v) => {
-                  setLatitude(v);
-                  setResult(null);
+                  setCoords(v);
                   setError(null);
                 }}
-                placeholder="30.7333"
-                min={-90}
-                max={90}
-                error={latitude ? validation.lat : null}
-              />
-              <NumberField
-                label="Longitude"
-                hint="−180 … 180"
-                required
-                value={longitude}
-                onChange={(v) => {
-                  setLongitude(v);
-                  setResult(null);
-                  setError(null);
-                }}
-                placeholder="76.7794"
-                min={-180}
-                max={180}
-                error={longitude ? validation.lng : null}
+                error={validationError}
+                parsed={parsed}
               />
               <label className="block">
                 <span className="text-[11px] font-semibold uppercase tracking-widest text-text-tertiary">
@@ -414,10 +413,10 @@ export default function PredictPage() {
               <div className="flex items-center gap-2">
                 <button
                   type="submit"
-                  disabled={!canSubmit}
+                  disabled={!parsed || submitting}
                   className={clsx(
                     "flex flex-1 items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium transition-colors duration-150",
-                    canSubmit
+                    parsed && !submitting
                       ? "bg-accent-primary/20 text-accent-primary hover:bg-accent-primary/30"
                       : "cursor-not-allowed bg-bg-raised text-text-tertiary",
                   )}
@@ -444,10 +443,12 @@ export default function PredictPage() {
                 </button>
               </div>
               <p className="text-[11px] leading-relaxed text-text-tertiary">
-                Only the fields the brief recommends are collected — the other 35
+                Only the fields the brief recommends are collected — the other
                 features are derived from FIRMS history, OSM, land cover, and
-                weather archives for that exact point. Prediction typically takes
-                up to a minute on first run while external sources are queried.
+                weather archives for that exact point (fetched in parallel).
+                Classification starts automatically as you type — no button
+                needed. First run for a fresh area can still take a few seconds
+                while external sources are queried; repeats are served from cache.
               </p>
             </form>
           </section>
@@ -493,9 +494,10 @@ export default function PredictPage() {
                   No prediction yet
                 </p>
                 <p className="max-w-sm text-xs leading-relaxed text-text-tertiary">
-                  Enter coordinates of a FIRMS hotspot (or any point of interest)
-                  and run the classifier. The result will appear here with per-class
-                  probabilities, key drivers, and a grounded explanation.
+                  Type coordinates of a FIRMS hotspot (or any point of interest) —
+                  latitude, longitude — and the classifier runs automatically.
+                  The result appears here with per-class probabilities, key
+                  drivers, and a grounded explanation.
                 </p>
               </div>
             )}
@@ -638,7 +640,7 @@ export default function PredictPage() {
                     Analysis record
                   </h3>
                   <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                    <MonoStat label="Analyzed location" value={`${validation.latNum.toFixed(4)}°, ${validation.lngNum.toFixed(4)}°`} />
+                    <MonoStat label="Analyzed location" value={`${result.latitude.toFixed(4)}°, ${result.longitude.toFixed(4)}°`} />
                     <MonoStat label="Hotspot ID" value={result.hotspot_id} />
                     <MonoStat
                       label="Timestamp (UTC)"
@@ -691,4 +693,3 @@ export default function PredictPage() {
   );
 }
 
-const requiredMsg = "Required.";

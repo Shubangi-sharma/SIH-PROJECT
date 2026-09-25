@@ -151,6 +151,10 @@ async def predict_endpoint(
 
     return {
         "hotspot_id": created.hotspot.hotspot_uid,
+        # Echo the analyzed coordinates so clients can display them from the
+        # response itself (single source of truth for what was classified).
+        "latitude": body.latitude,
+        "longitude": body.longitude,
         "class": result.predicted_class,
         "probabilities": result.probabilities,
         "confidence": result.confidence,

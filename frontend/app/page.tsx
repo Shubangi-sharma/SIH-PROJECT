@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -10,6 +10,9 @@ import { useAnalyses, useFirms, useCommand } from "@/lib/hooks";
 import { REGION_BBOXES, northOrWestRegion } from "@/lib/regions";
 import { StatusBadge, StatusGlyph } from "@/lib/status";
 import StatTile from "@/components/StatTile";
+import HotspotHistoricalRisk, {
+  type HistoricalRiskInput,
+} from "@/components/HotspotHistoricalRisk";
 import type { MapView } from "@/components/MapInner";
 
 const MapInner = dynamic(() => import("@/components/MapInner"), {
@@ -105,6 +108,30 @@ export default function DashboardPage() {
     }
     return [...counts.entries()].sort((a, b) => b[1] - a[1]);
   }, [command]);
+
+  /** Historical-risk scope: the 5 most recent hotspots (newest first).
+      Reuses the real FIRMS rows already fetched for the dashboard. */
+  const historicalHotspots = useMemo<HistoricalRiskInput[]>(
+    () =>
+      [...hotspots]
+        .sort((a, b) =>
+          b.acqDate.localeCompare(a.acqDate) || b.acqTime.localeCompare(a.acqTime),
+        )
+        .slice(0, 5)
+        .map((h) => ({
+          latitude: h.latitude,
+          longitude: h.longitude,
+          frp: h.frp,
+          acqDate: h.acqDate,
+        })),
+    [hotspots],
+  );
+  const [historicalIdx, setHistoricalIdx] = useState(0);
+  const historicalIdxSafe = Math.min(historicalIdx, Math.max(0, historicalHotspots.length - 1));
+  const historicalHotspotKey =
+    historicalHotspots[historicalIdxSafe] != null
+      ? `${historicalHotspots[historicalIdxSafe].latitude},${historicalHotspots[historicalIdxSafe].longitude},${historicalHotspots[historicalIdxSafe].acqDate}`
+      : "none";
 
   return (
     <div className="pyro-scroll h-full overflow-y-auto">
@@ -262,6 +289,49 @@ export default function DashboardPage() {
             </div>
           )}
         </section>
+
+        {/* historical risk — GRU 1/3/7-day signal for a recent hotspot.
+            Scoped to the top hotspot; swappable from the dropdown. */}
+        {!loading && historicalHotspots.length > 0 && (
+          <section aria-label="Historical risk" className="flex flex-col gap-3">
+            <div className="flex items-baseline justify-between px-1">
+              <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-text-secondary">
+                Historical Risk
+              </h2>
+              <span className="font-mono text-[10px] text-text-tertiary">
+                GRU replay · FIRMS persistence + weather history
+              </span>
+            </div>
+            <div className="flex items-center gap-2 px-1">
+              <label
+                htmlFor="historical-hotspot"
+                className="text-[11px] uppercase tracking-wider text-text-tertiary"
+              >
+                Hotspot
+              </label>
+              <select
+                id="historical-hotspot"
+                value={historicalIdxSafe}
+                onChange={(e) => setHistoricalIdx(Number(e.target.value))}
+                className="max-w-[420px] flex-1 rounded-lg border border-border-hairline bg-bg-inset px-3 py-1.5 text-sm text-text-primary outline-none transition-colors duration-150 focus:border-accent-primary"
+              >
+                {historicalHotspots.map((h, i) => (
+                  <option key={`${h.latitude},${h.longitude},${h.acqDate}`} value={i}>
+                    {h.latitude.toFixed(3)}, {h.longitude.toFixed(3)} · {h.acqDate} · {h.frp.toFixed(0)} MW
+                  </option>
+                ))}
+              </select>
+            </div>
+            <HotspotHistoricalRisk
+              key={historicalHotspotKey}
+              hotspot={historicalHotspots[historicalIdxSafe]}
+              autoRun
+            />
+            <p className="px-1 text-[11px] leading-relaxed text-text-tertiary">
+              Scope: the GRU replays a 30-day window over this hotspot&apos;s FIRMS persistence and weather history.
+            </p>
+          </section>
+        )}
 
         {/* behavioural category mix — rule-based vocabulary, NOT ML classes */}
         {!loading && categoryCounts.length > 0 && (

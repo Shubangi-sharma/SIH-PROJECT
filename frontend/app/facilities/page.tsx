@@ -1,6 +1,6 @@
 "use client";
 
-import React, { Suspense, useMemo, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Search } from "lucide-react";
@@ -32,12 +32,29 @@ const SEVERITY_RANK: Record<RiskStatus, number> = {
   normal: 4,
 };
 
+/**
+ * Pagination: render at most this many cards at once (§5 payload/render
+ * discipline). Hundreds of simultaneous cards reflow the grid and jank the
+ * showcase; a "Load more" button mounts the next slice on demand.
+ */
+const PAGE_SIZE = 30;
+
 /** Skeleton card matching the real card layout (design.md, no spinners). */
 function CardSkeleton() {
   return (
     <div className="h-[132px] animate-pulse rounded-xl bg-bg-surface" aria-hidden />
   );
 }
+
+/**
+ * content-visibility lets the browser skip layout/paint for cards scrolled
+ * out of view — the same lever as pagination, applied per-card, so even the
+ * mounted 30 only cost anything when actually visible.
+ */
+const cardContentVisibilityStyle: React.CSSProperties = {
+  contentVisibility: "auto",
+  containIntrinsicSize: "300px 132px",
+};
 
 /**
  * Memoised card — a SWR refresh re-renders only cards whose underlying
@@ -53,6 +70,7 @@ const FacilityCard = React.memo(function FacilityCard({
   return (
     <Link
       href={`/facilities/${f.id}`}
+      style={cardContentVisibilityStyle}
       className="group relative flex flex-col gap-3 overflow-hidden rounded-xl bg-bg-surface p-5 transition-colors duration-150 hover:bg-bg-raised"
     >
       <span
@@ -106,6 +124,18 @@ function FacilitiesBody() {
         (a, b) => SEVERITY_RANK[a.status] - SEVERITY_RANK[b.status] || a.score - b.score,
       );
   }, [analyses, query, statusFilter, typeFilter]);
+
+  /** How many cards are mounted; grows only via the Load more button. */
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+
+  // Any change to the result set (filters, search, refetch) resets to the
+  // first page so the user never lands mid-list on stale pagination.
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [filtered]);
+
+  const paged = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount]);
+  const hasMore = filtered.length > paged.length;
 
   return (
     <div className="pyro-scroll h-full overflow-y-auto">
@@ -186,8 +216,25 @@ function FacilitiesBody() {
         <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {isLoading
             ? Array.from({ length: 8 }).map((_, i) => <CardSkeleton key={i} />)
-            : filtered.map((a) => <FacilityCard key={a.facility.id} analysis={a} />)}
+            : paged.map((a) => <FacilityCard key={a.facility.id} analysis={a} />)}
         </section>
+
+        {/* Load more — mounts the next PAGE_SIZE slice instead of rendering
+            every match at once (keeps the grid cheap with 100s of sites). */}
+        {hasMore && (
+          <div className="flex flex-col items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setVisibleCount((n) => n + PAGE_SIZE)}
+              className="rounded-lg border border-border-hairline bg-bg-surface px-6 py-2.5 text-sm font-medium text-text-primary transition-colors duration-150 hover:border-border-strong hover:bg-bg-raised focus:border-accent-primary/60 focus:outline-none focus:ring-1 focus:ring-accent-primary/30"
+            >
+              Load more
+            </button>
+            <span className="font-mono text-[11px] text-text-tertiary">
+              {paged.length} of {filtered.length} shown
+            </span>
+          </div>
+        )}
 
         {!isLoading && error && (
           <div className="rounded-xl bg-bg-surface p-10 text-center">

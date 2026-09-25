@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import FacilityDetailPanel from "./FacilityDetailPanel";
 import CellPanel from "./CellPanel";
+import HotspotHistoricalRisk from "./HotspotHistoricalRisk";
 import { FirmsHotspotDetail } from "./MapMarkerTooltips";
 import FreshnessBadge from "./FreshnessBadge";
 import { frpBandIndex } from "./MapCanvas";
@@ -329,6 +330,7 @@ function EmptySummary({
           </div>
         )}
       </section>
+
     </>
   );
 }
@@ -451,6 +453,7 @@ export default function DetailDrawer({
               </div>
               <div className="pyro-scroll min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
                 <FirmsHotspotDetail hotspot={selection.hotspot} />
+                <HotspotHistoricalRisk hotspot={selection.hotspot} />
                 <button
                   type="button"
                   onClick={selection.onViewSatellite}

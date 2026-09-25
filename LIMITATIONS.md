@@ -49,22 +49,35 @@ than hiding cells.
 
 ## 6. Weather inputs have documented gaps
 
-- Relative humidity and solar radiation (ssrd) came from training sources the
-  live pipeline approximates: RH from Open-Meteo daily aggregates, ssrd
-  derived from `shortwave_radiation_sum` ÷ 86400 (daily mean as a conservative
-  max proxy). Both derivations are marked in `fill_applied` provenance on
-  every feature-store row.
+- Live `/predict` + `/observations` now derive relative humidity (mean/min)
+  and solar radiation (mean/max ssrd) from Open-Meteo's HOURLY series — real
+  derivations, no longer training-prior fallbacks. The H3 feature-store
+  pipeline still approximates: RH from hourly aggregates, ssrd derived from
+  `shortwave_radiation_sum` ÷ 86400 (daily mean as a conservative max
+  proxy). Both derivations are marked in `fill_applied` provenance on every
+  feature-store row.
 - Weather is **forward-filled at most 7 days, never backward-filled** (the
   V3→V4 lesson). Beyond that, the cell-day is excluded — a missing value is
   never guessed.
+- The live weather window ends at the ERA5 publication tail (~5 days lag),
+  discovered automatically from the archive's 400 error and clamped —
+  fresh points no longer silently fall back to zero priors.
+- The OSM-derived land-cover source has no snow/ice class — that ratio is
+  always the 0.0 training prior (a documented approximation, also shown on
+  the facility page).
 
 ## 7. Feature engineering approximations (live vs. training parity)
 
 - `unique_h3_cells` for the classifier is approximated by counting distinct
   rounded detection locations in the radius (documented in
   `features/engineer.py`).
-- Daily wind mean falls back to the daily max when the archive's mean is
-  unavailable; `mean_precipitation` derives from the daily sum ÷ 24.
+- Proximity flags (`near_*`) derive from the same Overpass distances as the
+  `distance_to_*_km` features (thresholds 500 m/1 km/2 km/5 km); when a
+  category's distance is unknown the flag stays at its 0.0 training prior.
+- Daily wind mean falls back to the mean of daily maxima when the archive's
+  mean is unavailable; temperature `max_/min_` are window extremes (max of
+  daily maxima, min of daily minima); `mean_precipitation` derives from the
+  daily sum ÷ 24.
 
 ## 8. Operational facts the demo should state
 
