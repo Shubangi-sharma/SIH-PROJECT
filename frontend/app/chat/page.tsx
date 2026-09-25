@@ -74,17 +74,25 @@ export default function ChatPage() {
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-gradient-mesh">
-      {/* header */}
+      {/* header — same glass as the TopBar so the chrome reads as one piece */}
       <div
-        className="flex items-center justify-between border-b border-border-hairline px-5 py-3"
+        className="flex items-center justify-between border-b border-white/[0.06] px-5 py-3"
         style={{
-          background: "rgba(10,13,16,0.6)",
-          backdropFilter: "blur(16px)",
-          WebkitBackdropFilter: "blur(16px)",
+          background:
+            "linear-gradient(180deg, rgba(12, 16, 21, 0.85) 0%, rgba(9, 12, 16, 0.75) 100%)",
+          backdropFilter: "blur(20px) saturate(1.3)",
+          WebkitBackdropFilter: "blur(20px) saturate(1.3)",
         }}
       >
         <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-accent-primary/10">
+          <div
+            className="flex h-9 w-9 items-center justify-center rounded-xl"
+            style={{
+              background:
+                "linear-gradient(135deg, rgba(91,155,213,0.16) 0%, rgba(79,179,179,0.12) 100%)",
+              border: "1px solid rgba(91,155,213,0.22)",
+            }}
+          >
             <Sparkles size={16} className="text-accent-primary" />
           </div>
           <div>
@@ -101,7 +109,7 @@ export default function ChatPage() {
             type="button"
             onClick={clearMessages}
             aria-label="New conversation"
-            className="flex h-8 items-center gap-1.5 rounded-lg border border-border-hairline px-3 text-text-tertiary transition-colors hover:border-border-strong hover:text-text-secondary"
+            className="map-glass flex h-8 items-center gap-1.5 rounded-lg px-3 text-text-tertiary transition-colors hover:text-text-secondary"
           >
             <RotateCcw size={12} />
             <span className="text-[11px]">New chat</span>
@@ -135,13 +143,14 @@ export default function ChatPage() {
         )}
       </div>
 
-      {/* composer */}
+      {/* composer — glass bar mirroring the header */}
       <div
-        className="border-t border-border-hairline px-5 py-3"
+        className="border-t border-white/[0.06] px-5 py-3"
         style={{
-          background: "rgba(10,13,16,0.6)",
-          backdropFilter: "blur(16px)",
-          WebkitBackdropFilter: "blur(16px)",
+          background:
+            "linear-gradient(0deg, rgba(12, 16, 21, 0.85) 0%, rgba(9, 12, 16, 0.75) 100%)",
+          backdropFilter: "blur(20px) saturate(1.3)",
+          WebkitBackdropFilter: "blur(20px) saturate(1.3)",
         }}
       >
         <form
@@ -160,13 +169,18 @@ export default function ChatPage() {
             disabled={isLoading}
             rows={1}
             aria-label="Message"
-            className="max-h-[140px] min-h-[44px] flex-1 resize-none rounded-xl border border-border-hairline bg-bg-inset/50 px-4 py-3 font-body text-sm leading-relaxed text-text-primary placeholder:text-text-tertiary focus:border-accent-primary/40 focus:outline-none focus:ring-1 focus:ring-accent-primary/20 disabled:opacity-50"
+            className="max-h-[140px] min-h-[44px] flex-1 resize-none rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 font-body text-sm leading-relaxed text-text-primary backdrop-blur-sm placeholder:text-text-tertiary focus:border-accent-primary/40 focus:outline-none focus:ring-1 focus:ring-accent-primary/20 disabled:opacity-50"
           />
           <button
             type="submit"
             disabled={isLoading || !input.trim()}
             aria-label="Send message"
-            className="flex h-[44px] w-[44px] flex-shrink-0 items-center justify-center rounded-xl bg-accent-primary text-white transition-all hover:opacity-90 disabled:opacity-25"
+            className="flex h-[44px] w-[44px] flex-shrink-0 items-center justify-center rounded-xl text-white transition-all hover:opacity-90 disabled:opacity-25"
+            style={{
+              background:
+                "linear-gradient(135deg, rgba(91,155,213,0.85) 0%, rgba(79,179,179,0.8) 100%)",
+              boxShadow: "0 4px 16px rgba(91,155,213,0.25)",
+            }}
           >
             <Send size={15} />
           </button>
@@ -203,10 +217,17 @@ function MessageRow({ message }: { message: ChatMessage }) {
         aria-hidden
         className={clsx(
           "mt-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl",
-          isUser
-            ? "bg-bg-raised text-text-secondary"
-            : "bg-accent-primary/10 text-accent-primary",
+          isUser ? "bg-white/[0.05] text-text-secondary" : "text-accent-primary",
         )}
+        style={
+          isUser
+            ? undefined
+            : {
+                background:
+                  "linear-gradient(135deg, rgba(91,155,213,0.16) 0%, rgba(79,179,179,0.12) 100%)",
+                border: "1px solid rgba(91,155,213,0.22)",
+              }
+        }
       >
         {isUser ? <User size={14} /> : <Sparkles size={14} />}
       </div>
@@ -216,7 +237,7 @@ function MessageRow({ message }: { message: ChatMessage }) {
             "rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
             isUser
               ? "rounded-tr-md bg-accent-primary/10 text-text-primary"
-              : "rounded-tl-md border border-border-hairline bg-bg-surface/50 text-text-secondary backdrop-blur-sm",
+              : "map-glass rounded-tl-md text-text-secondary",
           )}
         >
           {isUser ? message.text : <MarkdownText>{message.text}</MarkdownText>}
@@ -245,7 +266,7 @@ function TypingRow() {
       >
         <Sparkles size={14} />
       </div>
-      <div className="flex items-center gap-1.5 rounded-2xl rounded-tl-md border border-border-hairline bg-bg-surface/50 px-4 py-3 backdrop-blur-sm">
+      <div className="map-glass flex items-center gap-1.5 rounded-2xl rounded-tl-md px-4 py-3">
         {[0, 1, 2].map((i) => (
           <span
             key={i}
@@ -268,8 +289,15 @@ function EmptyState({
   return (
     <div className="flex h-full flex-col items-center justify-center gap-8 px-6 py-10">
       <div className="flex flex-col items-center gap-4 text-center">
-        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-accent-primary/[0.08]">
-          <Sparkles size={28} className="text-accent-primary/60" />
+        <div
+          className="flex h-16 w-16 items-center justify-center rounded-2xl"
+          style={{
+            background:
+              "radial-gradient(120% 140% at 30% 0%, rgba(91,155,213,0.14) 0%, rgba(79,179,179,0.08) 55%, transparent 100%), rgba(255,255,255,0.02)",
+            border: "1px solid rgba(91,155,213,0.18)",
+          }}
+        >
+          <Sparkles size={28} className="text-accent-primary/70" />
         </div>
         <div>
           <h2 className="font-display text-lg font-semibold text-text-primary">
@@ -289,7 +317,7 @@ function EmptyState({
             type="button"
             onClick={() => onPick(query)}
             disabled={disabled}
-            className="group flex items-center gap-3 rounded-xl border border-border-hairline bg-bg-surface/30 px-4 py-3 text-left backdrop-blur-sm transition-all hover:border-border-strong hover:bg-bg-raised/50 disabled:opacity-50"
+            className="map-glass group flex items-center gap-3 rounded-xl px-4 py-3 text-left transition-all duration-200 hover:-translate-y-px hover:text-text-primary disabled:opacity-50"
           >
             <Icon size={14} className="flex-shrink-0 text-text-tertiary transition-colors group-hover:text-accent-primary" />
             <div className="min-w-0">

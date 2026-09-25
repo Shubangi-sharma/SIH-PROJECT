@@ -26,7 +26,8 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { GitCompareArrows, Loader2, MapPin, X } from "lucide-react";
+import { GitCompareArrows, MapPin, X } from "lucide-react";
+import PyroLoader from "@/components/PyroLoader";
 import { useAnalyses, useFirms } from "@/lib/hooks";
 import { fetchFacilityAnalysis } from "@/lib/api";
 import type { WhatChangedRowDto } from "@/lib/api";
@@ -37,15 +38,16 @@ import { RiskStatus, STATUS_META } from "@/lib/types";
 import { haversineKm } from "@/lib/geo";
 import type { FirmsHotspot } from "@/lib/firms";
 
-const AXIS = { fill: "#78808C", fontSize: 11 } as const;
-const GRID = "#1A2028";
+const AXIS = { fill: "#96A3B5", fontSize: 11 } as const;
+const GRID = "#1F2733";
 
 const tooltipStyle = {
-  backgroundColor: "#101418",
-  border: "1px solid #1A2028",
+  backgroundColor: "rgba(12, 15, 19, 0.95)",
+  border: "1px solid rgba(255,255,255,0.06)",
   borderRadius: 10,
   fontSize: 12,
-  color: "#C6CDD6",
+  color: "#E6ECF4",
+  boxShadow: "0 8px 32px rgba(0, 0, 0, 0.4)",
 };
 
 /** One pinned facility: classification + what-changed + FRP trend. */
@@ -141,13 +143,13 @@ export default function ComparePage() {
   if (!hydrated) {
     return (
       <div className="flex h-full items-center justify-center">
-        <Loader2 size={18} className="animate-spin text-text-tertiary" />
+        <PyroLoader label="Loading comparison" compact />
       </div>
     );
   }
 
   return (
-    <div className="pyro-scroll h-full overflow-y-auto">
+    <div className="pyro-scroll h-full overflow-y-auto bg-gradient-mesh">
       <div className="mx-auto flex max-w-[1200px] flex-col gap-6 p-6 pb-20">
         <header className="pt-4">
           <h1 className="flex items-center gap-2.5 font-display text-2xl font-semibold text-text-primary">
@@ -177,14 +179,13 @@ export default function ComparePage() {
         )}
 
         {isLoading && (
-          <div className="flex h-40 items-center justify-center gap-2 text-sm text-text-tertiary">
-            <Loader2 size={15} className="animate-spin" />
-            Loading classifications…
+          <div className="flex h-40 items-center justify-center">
+            <PyroLoader label="Loading classifications" compact />
           </div>
         )}
 
         {!isLoading && ids.length < 2 && (
-          <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border-hairline bg-bg-surface/40 p-12 text-center">
+          <div className="map-glass flex flex-col items-center gap-3 rounded-xl p-12 text-center">
             <GitCompareArrows size={22} className="text-text-tertiary" />
             <p className="text-sm text-text-secondary">
               Pin {2 - ids.length} more facilit{ids.length === 1 ? "y" : "ies"} to compare
@@ -204,7 +205,7 @@ export default function ComparePage() {
         )}
 
         {!isLoading && ids.length >= 2 && resolved.length < ids.length && (
-          <p className="rounded-lg border border-border-hairline bg-bg-raised px-3 py-2 text-xs text-text-secondary">
+          <p className="map-glass rounded-lg px-3 py-2 text-xs text-text-secondary">
             Some pinned facilities are outside the current region window and
             couldn&apos;t be resolved. Clear pins and reselect within the loaded
             region.
@@ -214,7 +215,7 @@ export default function ComparePage() {
         {resolved.length >= 2 && (
           <>
             {/* FRP trend — real stored detections, mean FRP per active day */}
-            <section className="rounded-xl bg-bg-surface p-5">
+            <section className="dash-card rounded-xl p-5">
               <h3 className="font-display text-sm font-semibold text-text-primary">
                 FRP trend — mean MW per active day (last 10 days)
               </h3>
@@ -224,9 +225,7 @@ export default function ComparePage() {
               </p>
               <div className="mt-4 h-[260px]">
                 {firmsLoading ? (
-                  <div className="flex h-full items-center justify-center gap-2 text-xs text-text-tertiary">
-                    <Loader2 size={14} className="animate-spin" /> Loading detections…
-                  </div>
+                  <div className="skeleton-shimmer h-full w-full rounded-lg" aria-hidden />
                 ) : chartData.length === 0 ? (
                   <div className="flex h-full items-center justify-center px-6 text-center text-xs text-text-tertiary">
                     No detections near any pinned facility in the current
@@ -298,7 +297,7 @@ function CompareCard({
   const a = analysis;
 
   return (
-    <div className="flex flex-col gap-4 rounded-xl bg-bg-surface p-5">
+    <div className="dash-card flex flex-col gap-4 rounded-xl p-5">
       <div className="flex items-start gap-2">
         <span className="mt-1.5 inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ backgroundColor: color }} />
         <div className="min-w-0">
@@ -326,26 +325,24 @@ function CompareCard({
           HS {a.score}
           <span className="text-text-tertiary">/100</span>
         </span>
-      </div>
-
-      <div className="grid grid-cols-2 gap-2 text-xs">
-        <div className="rounded-lg border border-border-hairline bg-bg-inset px-2.5 py-2">
+      </div>        <div className="grid grid-cols-2 gap-2 text-xs">
+          <div className="rounded-lg border border-border-hairline bg-white/[0.02] px-2.5 py-2">
           <div className="text-[9px] uppercase tracking-wider text-text-tertiary">Detections (10d)</div>
           <div className="mt-0.5 font-mono text-text-primary">{a.detectionCount}</div>
         </div>
-        <div className="rounded-lg border border-border-hairline bg-bg-inset px-2.5 py-2">
+          <div className="rounded-lg border border-border-hairline bg-white/[0.02] px-2.5 py-2">
           <div className="text-[9px] uppercase tracking-wider text-text-tertiary">Live mean FRP</div>
           <div className="mt-0.5 font-mono text-text-primary">
             {a.liveMeanFrp != null ? `${a.liveMeanFrp.toFixed(1)} MW` : "—"}
           </div>
         </div>
-        <div className="rounded-lg border border-border-hairline bg-bg-inset px-2.5 py-2">
+          <div className="rounded-lg border border-border-hairline bg-white/[0.02] px-2.5 py-2">
           <div className="text-[9px] uppercase tracking-wider text-text-tertiary">Baseline FRP</div>
           <div className="mt-0.5 font-mono text-text-primary">
             {a.baselineMeanFrp != null ? `${a.baselineMeanFrp.toFixed(1)} MW` : "—"}
           </div>
         </div>
-        <div className="rounded-lg border border-border-hairline bg-bg-inset px-2.5 py-2">
+          <div className="rounded-lg border border-border-hairline bg-white/[0.02] px-2.5 py-2">
           <div className="text-[9px] uppercase tracking-wider text-text-tertiary">Latest FRP</div>
           <div className="mt-0.5 font-mono text-text-primary">
             {a.latestFrp != null ? `${a.latestFrp.toFixed(1)} MW` : "—"}
@@ -363,8 +360,8 @@ function CompareCard({
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={trend} margin={{ top: 4, right: 0, bottom: 0, left: -30 }}>
               <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="day" tick={{ fill: "#525A66", fontSize: 9 }} tickLine={false} axisLine={{ stroke: GRID }} />
-              <YAxis tick={{ fill: "#525A66", fontSize: 9 }} tickLine={false} axisLine={{ stroke: GRID }} />
+              <XAxis dataKey="day" tick={{ fill: "#6B7787", fontSize: 9 }} tickLine={false} axisLine={{ stroke: GRID }} />
+              <YAxis tick={{ fill: "#6B7787", fontSize: 9 }} tickLine={false} axisLine={{ stroke: GRID }} />
               <ReTooltip contentStyle={tooltipStyle} />
               <Bar dataKey="frp" fill={color} radius={[2, 2, 0, 0]} />
             </BarChart>

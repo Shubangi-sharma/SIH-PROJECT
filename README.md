@@ -4,9 +4,6 @@
   <p align="center">
     <strong>Next-Generation Industrial Thermal Intelligence & Risk Orchestration</strong>
   </p>
-  <p align="center">
-    <a href="docs/README.md">Deep-Dive Documentation</a>
-  </p>
 </div>
 
 ---
@@ -15,21 +12,29 @@
 
 **PyroSense** is an advanced geospatial intelligence platform that intercepts raw satellite thermal telemetry and transforms it into explainable, risk-ranked insights for industrial infrastructure. 
 
-For the complete deep-dive on architecture, ML pipelines, and API references, start here:
-**➡ [Read the full documentation (docs/README.md)](docs/README.md)**
+---
+
+## 🛠️ Tech Stack
+
+| Technology | Why it was chosen |
+|---|---|
+| **Next.js 14 (App Router)** | Client-side fetching via SWR with HTTP caching over a pure frontend architecture (no API keys in client). |
+| **Node.js / Express** | Robust backend to orchestrate external APIs (FIRMS, Overpass, OpenRouter) and proxy ML endpoints. |
+| **better-sqlite3 (WAL mode)** | Ultra-fast local database chosen for its millisecond reads, perfect for the current scope of minimal persistence needs. |
+| **FastAPI** | High-performance Python backend serving the ML inference pipelines, feature engineering, and OpenRouter GenAI caching. |
+| **PostgreSQL / PostGIS** | Relational data persistence for ML predictions, risk timelines, and spatial querying. |
+| **react-leaflet + supercluster** | Swapped out unmaintained clustering libraries for KD-tree based `supercluster`, enabling a 10x performance rewrite to render 50k+ points efficiently. |
+| **OpenRouter / LLMs** | Generates grounded summaries (temp 0) using structured facts directly from the backend to completely eliminate hallucinations. |
 
 ---
 
-## ✨ Feature List
+## 🤖 Models Used
 
-- **Geospatial Correlation Engine:** Binds NASA FIRMS (VIIRS & MODIS) hotspots to industrial assets using OSM Overpass polygons and point-in-polygon ray-casting.
-- **Thermal Fingerprinting (Baselining):** Computes a rolling, multi-dimensional baseline (FRP, spatial signatures, directional zone activity) to track what "normal" looks like.
-- **"What Changed" Analysis:** Generates programmatic signals when live data deviates from a facility's fingerprint (e.g. spatial spread expansion or frequency spikes).
-- **Grounded Generative AI Assistant:** Provides stateless Chatbot narratives (via OpenRouter) strictly grounded in computed facts, completely eliminating hallucinations.
-- **Multi-Dimensional Risk Scoring:** Scores assets dynamically (0–100) using inverse facility health, classification severity, FRP deviation, and temporal trends.
-- **Hotspot Classification:** Contextual tagging using a 5-class Gradient Boosting / MLP classifier, augmented with land cover and weather data.
-- **1/3/7-Day Risk Horizons:** Predicts future wildfire risk using GRU models over a 30-day feature history.
-- **High-Performance Map Rendering:** Displays thousands of FIRMS points alongside facility polygons seamlessly using `useSupercluster` KD-tree clustering.
+| Model | Purpose | Input Features | Key Metrics |
+|---|---|---|---|
+| **Gradient Boosting Classifier (old)** | Predicts contextual hotspot categories (4 classes). | 36 features | No verified accuracy or F1 metrics documented in the repository. |
+| **MLP Classifier (new)** | Predicts contextual hotspot categories (5 classes). | 43 features | Training samples: NOT YET PROVIDED, Random-split accuracy: NOT YET PROVIDED. |
+| **1/3/7-Day GRU Risk Models** | Predicts wildfire risk at 1-day, 3-day, and 7-day horizons over H3 resolution-7 cells. | 30 days × 17 features per day | Test accuracy, ROC-AUC, PR-AUC: NOT YET PROVIDED. |
 
 ---
 
@@ -41,15 +46,11 @@ flowchart LR
     OSM[OSM Overpass] --> Node
     
     subgraph "Node.js Backend (:4000)"
-        Node[Express API]
-        SQLite[(SQLite WAL)]
-        Node <--> SQLite
+        Node[Express API] <--> SQLite[(SQLite WAL)]
     end
 
     subgraph "Python ML Service (:5000)"
-        FastAPI[FastAPI]
-        PostGIS[(PostgreSQL/PostGIS)]
-        FastAPI <--> PostGIS
+        FastAPI[FastAPI] <--> PostGIS[(PostgreSQL/PostGIS)]
     end
     
     Node <--> FastAPI
@@ -64,21 +65,6 @@ flowchart LR
 - **Frontend (`/frontend`)**: Next.js 14 pure client, fetching precomputed results via SWR.
 - **Node Backend (`/backend`)**: Orchestration, geospatial compute, GenAI facts compilation, and SQLite storage for facilities & detections.
 - **FastAPI ML Service (`/pyrosense_ml`)**: Feature engineering, classification inference (GBM/MLP), risk prediction (GRU), and PostGIS prediction storage.
-
----
-
-## 🛠️ Tech Stack
-
-| Technology | Why it was chosen |
-|---|---|
-| **Next.js 14 (App Router)** | Client-side fetching via SWR with HTTP caching over a pure frontend architecture (no API keys in client). |
-| **Node.js / Express** | Robust backend to orchestrate external APIs (FIRMS, Overpass, OpenRouter) and proxy ML endpoints. |
-| **better-sqlite3 (WAL mode)** | Ultra-fast local database chosen for its millisecond reads, perfect for the current scope of minimal persistence needs. |
-| **FastAPI** | High-performance Python backend serving the ML inference pipelines, feature engineering, and OpenRouter GenAI caching. |
-| **PostgreSQL / PostGIS** | Relational data persistence for ML predictions, risk timelines, and spatial querying. |
-| **react-leaflet + supercluster** | Swapped out unmaintained clustering libraries for KD-tree based `supercluster`, enabling a 10x performance rewrite to render 50k+ points efficiently. |
-| **scikit-learn / joblib / Keras** | Drives the 36-feature GBM classifier, MLP classifier, and GRU risk horizons. |
-| **OpenRouter / LLMs** | Generates grounded summaries (temp 0) using structured facts directly from the backend, failing over to deterministic templates. |
 
 ---
 
@@ -121,13 +107,18 @@ Access the **Command Dashboard** at `http://localhost:3000`.
 
 ---
 
-## ⚠️ Known Limitations
+## ⚠️ Good to know before you dig in
 
-- **Classification labels are contextual, not causal:** The hotspot classifier infers type from OSM proximity, land cover, and fire history. It does not provide independent ground-truth ignition causes.
-- **Risk levels are decision thresholds:** Risk signals are rule-based derivations from fixed thresholds, not calibrated probabilities.
-- **Weather and spatial coverage gaps:** Training data represents a limited number of H3 cells, and live weather inputs use safe approximations or degraded priors when external services fail.
+- **Contextual, not causal labels:** The hotspot classifier infers type from proximity and history; it does not provide independent ground-truth ignition causes.
+- **Risk thresholds, not probabilities:** Risk signals are rule-based derivations from fixed thresholds (e.g. 1-day 0.65), not calibrated percentage chances of fire.
+- **The Unknown path is mandatory:** Low confidence classifications (`< 0.40`) force a "Needs Review" state rather than an incorrect guess.
+- **The 7-day model is a weak signal:** Validation metrics for the 7-day risk model were weak; it should be treated as a long-range signal only.
+- **Weather and spatial gaps:** Training data is limited in spatial coverage, and live weather inputs use safe approximations or degraded priors when external services fail.
 
-For the full list, read the [Known Limitations & Possible Improvements](docs/LIMITATIONS_AND_IMPROVEMENTS.md).
+---
+
+📖 **Want to go deeper — full architecture, the reasoning behind every major decision, and honest answers to the hard questions?**
+➡️ **[Explore the docs](docs/index.md)**
 
 ---
 
