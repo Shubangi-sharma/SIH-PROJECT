@@ -59,7 +59,7 @@ export default function MapPage() {
   const [selectedHotspotKey, setSelectedHotspotKey] = useState<string | null>(null);
   const handleSelectHotspot = useCallback((key: string | null) => {
     setSelectedHotspotKey(key);
-    if (key) setSelectedCell(null); // panels are mutually exclusive
+    if (key) setSelectedArea(null); // panels are mutually exclusive
   }, []);
 
   /* -------- plain-language area click panel (replaces the H3 cell panel):

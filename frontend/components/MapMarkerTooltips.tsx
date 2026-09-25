@@ -229,7 +229,7 @@ export function FirmsHotspotDetail({ hotspot }: { hotspot: FirmsHotspot }) {
     ["Coordinates", `${hotspot.latitude.toFixed(4)}°, ${hotspot.longitude.toFixed(4)}°`],
   ];
   return (
-    <section className="rounded-xl bg-bg-surface p-4">
+    <section className="dash-card rounded-xl p-4">
       <div className="flex items-center gap-2">
         <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: hex }} />
         <span className="font-display text-sm font-semibold text-text-primary">

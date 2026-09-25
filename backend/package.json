@@ -1,6 +1,7 @@
 {
   "name": "pyrosense-backend",
   "version": "0.1.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "description": "PYROSENSE backend — data ingestion, scoring, and AI summary service",

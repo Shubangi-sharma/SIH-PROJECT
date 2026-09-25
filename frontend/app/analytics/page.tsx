@@ -264,12 +264,19 @@ export default function AnalyticsPage() {
           )}
         </header>
 
-        {/* ── summary metrics ──────────────────────────────────────── */}
+        {/* ── summary metrics ──────────────────────────────────── */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <SummaryStat label="VIIRS Detections (10d)" value={loading ? "—" : totalDetections} accent="#5B9BD5" />
-          <SummaryStat label="Critical Facilities" value={loading ? "—" : criticalCount} accent="#E06060" />
-          <SummaryStat label="Suspicious Facilities" value={loading ? "—" : suspiciousCount} accent="#E08A52" />
-          <SummaryStat label="Avg FRP (MW)" value={loading ? "—" : avgFrp} accent="#4FB3B3" />
+          {[{"label":"VIIRS Detections (10d)","value":loading ? "—" : totalDetections,"accent":"#5B9BD5"},{"label":"Critical Facilities","value":loading ? "—" : criticalCount,"accent":"#E06060"},{"label":"Suspicious Facilities","value":loading ? "—" : suspiciousCount,"accent":"#E08A52"},{"label":"Avg FRP (MW)","value":loading ? "—" : avgFrp,"accent":"#4FB3B3"}].map((s) => (
+            <div key={s.label} className="dash-card rounded-xl px-4 py-3">
+              <div
+                className={`font-display text-2xl font-semibold ${loading ? "animate-pulse" : ""}`}
+                style={{ color: s.accent }}
+              >
+                {s.value}
+              </div>
+              <div className="mt-0.5 text-[10px] uppercase tracking-wider text-text-tertiary">{s.label}</div>
+            </div>
+          ))}
         </div>
 
         {/* ── top row: detection trend + risk donut ─────────────────── */}

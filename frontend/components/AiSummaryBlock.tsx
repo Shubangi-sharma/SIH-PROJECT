@@ -28,7 +28,7 @@ export default function AiSummaryBlock({
   return (
     <section
       className={clsx(
-        "rounded-r-lg border-l-[3px] border-accent-violet bg-bg-raised p-4",
+        "rounded-r-lg border-l-[3px] border-accent-violet bg-white/[0.025] p-4",
         className,
       )}
     >

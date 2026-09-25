@@ -139,7 +139,7 @@ function ViewportRiskSection({ bbox }: { bbox: DrawerBBox }) {
   const headlineHorizon: RiskHorizon = "7day";
 
   return (
-    <section className="rounded-xl bg-bg-surface p-4">
+    <section className="dash-card rounded-xl p-4">
       <div className="flex items-baseline gap-2">
         <h3 className="font-display text-sm font-semibold text-text-primary">
           GRU risk signals
@@ -252,7 +252,7 @@ function EmptySummary({
 
   return (
     <>
-      <section className="rounded-xl bg-bg-surface p-4">
+      <section className="dash-card rounded-xl p-4">
         <div className="flex items-baseline gap-2">
           <span className="font-display text-3xl font-bold leading-none text-text-primary">
             {hotspots.length}
@@ -277,7 +277,7 @@ function EmptySummary({
         </div>
       </section>
 
-      <section className="rounded-xl bg-bg-surface p-4">
+      <section className="dash-card rounded-xl p-4">
         <h3 className="font-display text-sm font-semibold text-text-primary">
           Hotspots by FRP band
         </h3>
@@ -301,7 +301,7 @@ function EmptySummary({
 
       {viewportBbox && <ViewportRiskSection bbox={viewportBbox} />}
 
-      <section className="rounded-xl bg-bg-surface p-4">
+      <section className="dash-card rounded-xl p-4">
         <h3 className="font-display text-sm font-semibold text-text-primary">
           Facilities by risk status
         </h3>
@@ -474,7 +474,7 @@ export default function DetailDrawer({
                           key={a.facility.id}
                           type="button"
                           onClick={() => selection.onSelectFacility(a.facility.id)}
-                          className="flex w-full items-center gap-3 rounded-lg border border-border-hairline bg-bg-surface px-3 py-2.5 text-left transition-colors duration-150 hover:border-border-strong hover:bg-bg-raised"
+                          className="flex w-full items-center gap-3 rounded-lg border border-border-hairline bg-white/[0.02] px-3 py-2.5 text-left transition-colors duration-150 hover:border-border-strong hover:bg-white/[0.04]"
                         >
                           <span
                             className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full"

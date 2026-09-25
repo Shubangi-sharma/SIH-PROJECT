@@ -10,7 +10,7 @@ export default function WhatChangedPanel({
   rows: WhatChangedRow[];
 }) {
   return (
-    <section className="rounded-xl bg-bg-surface p-4">
+    <section className="dash-card rounded-xl p-4">
       <h3 className="font-display text-sm font-semibold text-text-primary">
         What Changed?
       </h3>

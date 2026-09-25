@@ -133,4 +133,4 @@ For the full list, read the [Known Limitations & Possible Improvements](docs/LIM
 
 ## 📝 License / Credits
 
-License: not yet specified
+License: MIT — see [LICENSE](LICENSE)

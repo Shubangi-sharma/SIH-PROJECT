@@ -47,7 +47,7 @@ function FieldGroupSection({
   children?: React.ReactNode;
 }) {
   return (
-    <section className="rounded-xl bg-bg-surface p-5">
+    <section className="dash-card rounded-xl p-5">
       <h3 className="font-display text-sm font-semibold text-text-primary">{title}</h3>
       {note && <p className="mt-1 text-[11px] leading-relaxed text-text-tertiary">{note}</p>}
       {empty ? (
@@ -203,7 +203,7 @@ export default function FacilityDetailPage() {
         <div className="grid gap-6 lg:grid-cols-[380px_1fr]">
           {/* LEFT: health + locator */}
           <div className="flex flex-col gap-6">
-            <section className="flex flex-col items-center gap-5 rounded-xl bg-bg-surface p-6">
+            <section className="dash-card flex flex-col items-center gap-5 rounded-xl p-6">
               <HealthScoreRing score={c.score} status={status} />
               <SignalQualityBadge split={c.liveConfidenceSplit} />
               <div className="grid w-full grid-cols-2 gap-3">

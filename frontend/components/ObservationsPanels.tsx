@@ -220,7 +220,7 @@ export default function ObservationsPanels({ lat, lng }: { lat: number; lng: num
 
   if (error) {
     return (
-      <section className="rounded-xl bg-bg-surface p-5">
+      <section className="dash-card rounded-xl p-5">
         <h3 className="font-display text-sm font-semibold text-text-primary">Environment observations</h3>
         <p className="mt-3 rounded-lg border border-border-hairline bg-bg-raised px-3 py-2 text-xs leading-relaxed text-text-secondary">
           {error} — land cover, surroundings and weather are computed live by the
@@ -250,7 +250,7 @@ export default function ObservationsPanels({ lat, lng }: { lat: number; lng: num
         </section>
       )}
 
-      <section className="rounded-xl bg-bg-surface p-5">
+      <section className="dash-card rounded-xl p-5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="font-display text-sm font-semibold text-text-primary">Land cover</h3>
           <ProvenanceChip block="source" src={obs.land_cover.provenance} />
@@ -263,7 +263,7 @@ export default function ObservationsPanels({ lat, lng }: { lat: number; lng: num
         </div>
       </section>
 
-      <section className="rounded-xl bg-bg-surface p-5">
+      <section className="dash-card rounded-xl p-5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="font-display text-sm font-semibold text-text-primary">Surroundings</h3>
           <ProvenanceChip block="source" src={obs.surroundings.provenance} />
@@ -276,7 +276,7 @@ export default function ObservationsPanels({ lat, lng }: { lat: number; lng: num
         </div>
       </section>
 
-      <section className="rounded-xl bg-bg-surface p-5">
+      <section className="dash-card rounded-xl p-5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="font-display text-sm font-semibold text-text-primary">Weather</h3>
           <ProvenanceChip block="source" src={obs.weather.provenance} />

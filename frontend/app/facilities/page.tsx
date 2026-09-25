@@ -71,7 +71,7 @@ const FacilityCard = React.memo(function FacilityCard({
     <Link
       href={`/facilities/${f.id}`}
       style={cardContentVisibilityStyle}
-      className="group relative flex flex-col gap-3 overflow-hidden rounded-xl bg-bg-surface p-5 transition-colors duration-150 hover:bg-bg-raised"
+      className="dash-card group relative flex flex-col gap-3 overflow-hidden rounded-xl p-5 transition-colors duration-150 hover:bg-bg-raised"
     >
       <span
         aria-hidden
