@@ -227,9 +227,21 @@ v1Router.get("/api/v1/cells/:h3", async (req, res) => {
   }
 
   // Fetch cell risk + nearby hotspots in the same pass (parallel lanes).
+  // Hotspots are narrowed to the cell's own bbox (h3.cellToBoundary) so a
+  // single-cell request no longer scans/returns up to 50 hotspots worldwide.
+  const h3 = await import("h3-js");
+  const boundary = h3.cellToBoundary(h3Cell);
+  const lats = boundary.map((p) => p[0]);
+  const lngs = boundary.map((p) => p[1]);
   const [risk, hotspots] = await Promise.all([
     fetchCellRisk(h3Cell),
-    fetchHotspots({ limit: 50 }), // TODO(bbox): narrow by the cell's bbox once client exposes h3.cellToBoundary
+    fetchHotspots({
+      minLat: Math.min(...lats),
+      maxLat: Math.max(...lats),
+      minLng: Math.min(...lngs),
+      maxLng: Math.max(...lngs),
+      limit: 50,
+    }),
   ]);
 
   if (!risk && !hotspots) {

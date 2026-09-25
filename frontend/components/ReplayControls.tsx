@@ -15,9 +15,12 @@ import type { ReplayState } from "@/lib/replay";
  */
 export default function ReplayControls({
   replay,
+  count = 0,
   className,
 }: {
   replay: ReplayState;
+  /** Detections currently on the map for the replayed step (already filtered). */
+  count?: number;
   className?: string;
 }) {
   if (!replay.active) return null;
@@ -77,9 +80,16 @@ export default function ReplayControls({
         <span className="font-mono text-[11px] text-text-primary">
           {replay.label ?? `0 / ${replay.sequence.length}`}
         </span>
-        <span className="font-mono text-[11px] text-text-secondary">
-          {replay.current ? replay.current.acqDate : "start"}
-        </span>
+        {/* live count for the current step — same number the map shows */}
+        <div className="ml-1 text-right">
+          <div className="font-mono text-[12px] font-semibold leading-tight text-text-primary tabular-nums">
+            {count.toLocaleString("en-US")}
+            <span className="ml-1 text-[9px] font-normal text-text-tertiary">det</span>
+          </div>
+          <div className="font-mono text-[10px] leading-tight text-text-tertiary">
+            {replay.current ? replay.current.acqDate : "start"}
+          </div>
+        </div>
 
         <button
           type="button"

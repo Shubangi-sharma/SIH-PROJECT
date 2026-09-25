@@ -48,9 +48,10 @@ import clsx from "clsx";
  * pane is collapsible via the toggle button; any new selection auto-expands
  * it (handled by the parent page).
  *
- * Honesty rule (LIMITATIONS.md): FIRMS detections carry NO hotspot-type or
- * risk-horizon fields anywhere in the current API contract, so none are
- * shown here (see docs/UI_AUDIT.md → "Needs backend work").
+ * Honesty rule (docs/decisions-and-faq.md): FIRMS detections carry NO
+ * hotspot-type or risk-horizon fields anywhere in the current API contract,
+ * so none are shown here (a per-detection classification is listed under
+ * "Where this could improve" in the docs).
  */
 
 export type DetailDrawerSelection =
@@ -159,7 +160,7 @@ function ViewportRiskSection({ bbox }: { bbox: DrawerBBox }) {
         <p className="mt-3 text-xs text-text-tertiary">Checking stored predictions…</p>
       ) : tooLarge ? (
         <p className="mt-3 text-xs text-text-tertiary">
-          Zoom in — risk signals are computed per ~9 km² H3 cell, so very large
+          Zoom in - risk signals are computed per ~9 km² H3 cell, so very large
           views are not scored.
         </p>
       ) : unavailable ? (
@@ -169,7 +170,7 @@ function ViewportRiskSection({ bbox }: { bbox: DrawerBBox }) {
         </p>
       ) : data && Object.keys(data.risks).length === 0 ? (
         <p className="mt-3 text-xs text-text-tertiary">
-          No stored predictions for this view yet — run the ML pipeline (Settings → System status) to generate them.
+          No stored predictions for this view yet - run the ML pipeline (Settings → System status) to generate them.
         </p>
       ) : data ? (
         <>
@@ -191,7 +192,7 @@ function ViewportRiskSection({ bbox }: { bbox: DrawerBBox }) {
           </div>
           <p className="mt-2.5 text-[10px] leading-snug text-text-tertiary">
             {Object.keys(data.risks).length} scored cells · {data.missing.length} without stored history
-            {data.meta.cached ? " · cached" : ""} — click a cell on the map for horizons 1/3/7.
+            {data.meta.cached ? " · cached" : ""} - click a cell on the map for horizons 1/3/7.
           </p>
         </>
       ) : null}
@@ -462,7 +463,7 @@ export default function DetailDrawer({
                 {selection.relatedFacilities.length > 0 && (
                   <section>
                     <h3 className="font-display text-sm font-semibold text-text-primary">
-                      Nearby facilities — is this hotspot corroborated?
+                      Nearby facilities - is this hotspot corroborated?
                     </h3>
                     <p className="mt-1 text-xs leading-snug text-text-secondary">
                       Facilities whose corroboration radius (5 km) covers this
@@ -504,7 +505,7 @@ export default function DetailDrawer({
                 )}
                 {selection.relatedFacilities.length === 0 && (
                   <p className="rounded-lg border border-border-hairline bg-bg-raised px-3 py-2 text-xs text-text-secondary">
-                    No monitored facility within 15 km — this is likely biomass
+                    No monitored facility within 15 km - this is likely biomass
                     burning or an unmonitored source, not industrial activity.
                   </p>
                 )}

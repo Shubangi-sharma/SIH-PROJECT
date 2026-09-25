@@ -43,7 +43,7 @@ export default function MiniMapInner({
         className={satellite ? undefined : "map-tiles-dark"}
         attribution={
           satellite
-            ? 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community'
+            ? 'Tiles &copy; Esri - Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community'
             : '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         }
       />

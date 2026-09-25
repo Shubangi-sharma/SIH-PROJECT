@@ -42,7 +42,7 @@ export function contributionDeviationFor(feature: string, value: number | string
 /** Compact value formatting for feature readouts (mono, unit-aware). */
 export function formatFeatureValue(v: number | string): string {
   if (typeof v === "string") return v;
-  if (!Number.isFinite(v)) return "—";
+  if (!Number.isFinite(v)) return "-";
   const abs = Math.abs(v);
   if (abs >= 1000) return `${Math.round(v).toLocaleString("en-US")}`;
   if (abs >= 100) return v.toFixed(0);

@@ -213,30 +213,41 @@ export default function LandingPage() {
       <div className="relative z-10 flex flex-1 flex-col items-center justify-center px-6">
         <StatusCard mounted={mounted} />
 
-        {/* headline */}
+        {/* headline - the system watches every thermal anomaly, not just industrial */}
         <h1
-          className="max-w-2xl text-center font-display text-4xl font-bold leading-[1.1] tracking-tight text-white sm:text-5xl md:text-6xl"
+          className="max-w-2xl text-center font-display text-4xl font-bold leading-[1.08] tracking-tight text-white sm:text-5xl md:text-6xl"
           style={{
             opacity: mounted ? 1 : 0,
             transform: mounted ? "translateY(0)" : "translateY(16px)",
             transition: "opacity 0.7s ease 0.3s, transform 0.7s ease 0.3s",
           }}
         >
-          Industrial Thermal
+          Every Thermal Anomaly,
           <br />
-          <span className="text-[#6FAFDD]">Anomaly Detection</span>
+          <span
+            style={{
+              background:
+                "linear-gradient(90deg, #F5B04C 0%, #E06060 38%, #6FAFDD 72%, #4FB3B3 100%)",
+              WebkitBackgroundClip: "text",
+              backgroundClip: "text",
+              color: "transparent",
+            }}
+          >
+            Seen From Orbit
+          </span>
         </h1>
 
         {/* subtitle */}
         <p
-          className="mt-5 max-w-md text-center font-body text-[15px] leading-relaxed text-white/45"
+          className="mt-5 max-w-lg text-center font-body text-[15px] leading-relaxed text-white/45"
           style={{
             opacity: mounted ? 1 : 0,
             transition: "opacity 0.7s ease 0.5s",
           }}
         >
-          Satellite-powered fire monitoring with machine learning classification
-          and real-time risk scoring for industrial facilities across India.
+          Satellite-powered monitoring that detects, classifies and scores every
+          thermal anomaly - industrial fires, flares, crop burning, wildfires -
+          with real-time risk scoring across India.
         </p>
 
         {/* CTA */}
@@ -257,7 +268,7 @@ export default function LandingPage() {
           />
         </button>
 
-        {/* three pillars — what the system does */}
+        {/* three pillars - what the system does */}
         <div
           className="mt-16 grid w-full max-w-3xl grid-cols-1 gap-4 sm:grid-cols-3"
           style={{
@@ -278,7 +289,7 @@ export default function LandingPage() {
         </div>
       </div>
 
-      {/* ── Footer — real, clickable data-source credits ──────────── */}
+      {/* ── Footer - real, clickable data-source credits ──────────── */}
       <footer
         className="relative z-10 flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 px-6 py-5"
         style={{ opacity: mounted ? 1 : 0, transition: "opacity 1s ease 1s" }}

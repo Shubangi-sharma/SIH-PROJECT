@@ -3,7 +3,7 @@
  *
  * Mounted at /api/predict (POST) and /api/ml (GET). Response bodies pass
  * through UNCHANGED — no reshaping — so the contract is defined exactly
- * once (docs/api-contract.md mirrors pyrosense_ml's FastAPI response).
+ * once (frontend/lib/mlApi.ts mirrors pyrosense_ml's FastAPI response).
  */
 
 import { Router } from "express";

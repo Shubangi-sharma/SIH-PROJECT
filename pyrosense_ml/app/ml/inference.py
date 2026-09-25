@@ -1,6 +1,6 @@
 """Inference — the ONLY path through the classifier.
 
-Contract (Phase 2A + decision (b), docs/CLASSIFIER_DECISION.md):
+Contract (Phase 2A + decision (b), docs/decisions-and-faq.md):
 - Accepts a feature mapping with exactly the 43 frozen CLASSIFIER_FEATURES
   (model_version="new", default) or the 36 CLASSIFIER_FEATURES_OLD including
   the categorical dominant_land_cover (model_version="old").
@@ -62,7 +62,7 @@ def predict(features: dict[str, object], model_version: str | None = None) -> Pr
     """Validate + run the requested classifier on one hotspot's feature payload.
 
     model_version: "new" (default, MLP) or "old" (legacy GBM) — see
-    docs/CLASSIFIER_DECISION.md. Raises SchemaViolation on any schema problem
+    docs/decisions-and-faq.md. Raises SchemaViolation on any schema problem
     (missing/unknown features, non-numeric values, bad version).
     """
     version = resolve_classifier_version(model_version)

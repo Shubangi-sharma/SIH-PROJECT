@@ -74,7 +74,7 @@ export default function ChatPage() {
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-gradient-mesh">
-      {/* header — same glass as the TopBar so the chrome reads as one piece */}
+      {/* header - same glass as the TopBar so the chrome reads as one piece */}
       <div
         className="flex items-center justify-between border-b border-white/[0.06] px-5 py-3"
         style={{
@@ -143,7 +143,7 @@ export default function ChatPage() {
         )}
       </div>
 
-      {/* composer — glass bar mirroring the header */}
+      {/* composer - glass bar mirroring the header */}
       <div
         className="border-t border-white/[0.06] px-5 py-3"
         style={{
@@ -305,7 +305,7 @@ function EmptyState({
           </h2>
           <p className="mt-1.5 max-w-sm text-sm leading-relaxed text-text-secondary">
             Ask about facility health, thermal anomalies, risk classifications,
-            or recent changes — answers are grounded in live data only.
+            or recent changes - answers are grounded in live data only.
           </p>
         </div>
       </div>

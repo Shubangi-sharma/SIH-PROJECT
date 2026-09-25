@@ -12,7 +12,7 @@ pickles change.
 NOTE: there are three independent schemas because there are three
 independent model families: the NEW MLP classifier (43 features), the OLD
 Gradient Boosting classifier (36 features, kept as the "old" model_version
-per docs/CLASSIFIER_DECISION.md — decision (b) keep-alongside), and the
+per docs/decisions-and-faq.md — decision (b) keep-alongside), and the
 3-horizon GRU risk predictor (30x17 sequences).
 """
 
@@ -89,7 +89,7 @@ CLASSIFIER_BOOLEAN_FEATURES: Final[tuple[str, ...]] = (
 # ── OLD classifier schema (Gradient Boosting, kept per decision (b)) ─────────
 # Extracted verbatim from the pre-Phase-2A feature_schema.py (git 46cba71); the
 # names come from FINAL_GRADIENT_BOOSTING_MODEL.pkl's
-# preprocessor.feature_names_in_. Kept because docs/CLASSIFIER_DECISION.md
+# preprocessor.feature_names_in_. Kept because docs/decisions-and-faq.md
 # decision (b) keeps the GBM callable via model_version="old". Do not hand-edit.
 
 CLASSIFIER_FEATURES_OLD: Final[tuple[str, ...]] = (
@@ -147,7 +147,7 @@ VALID_LAND_COVER_CATEGORIES_OLD: Final[tuple[str, ...]] = (
 
 # ── Past/model labels surfaced to API consumers ────────────────────────────
 # classifier_model_used values, so downstream never has to guess which model
-# answered (see docs/CLASSIFIER_DECISION.md).
+# answered (see docs/decisions-and-faq.md).
 
 CLASSIFIER_USED_NEW: Final[str] = "mlp_v1"
 CLASSIFIER_USED_OLD: Final[str] = "gbm_v1"

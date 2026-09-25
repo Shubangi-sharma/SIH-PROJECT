@@ -1,7 +1,7 @@
 """DL integration tests — Phase 2A models + decision-(b) routing.
 
 Shape/plumbing tests only: synthetic np.random inputs with the correct shapes,
-no real data, no accuracy claims (docs/CLASSIFIER_DECISION.md explains why no
+no real data, no accuracy claims (docs/decisions-and-faq.md explains why no
 accuracy claims are possible in this repo yet).
 """
 

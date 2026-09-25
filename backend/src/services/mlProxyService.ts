@@ -6,7 +6,7 @@
  * backend:4000. This module forwards requests to pyrosense_ml (FastAPI,
  * default :5000) and returns the response body UNCHANGED — the frontend's
  * TypeScript types mirror the FastAPI response verbatim, so the contract is
- * defined exactly once (docs/api-contract.md).
+ * defined exactly once (see backend/src/routes/predict.route.ts).
  *
  * Timeouts are generous because /predict legitimately does real work:
  * feature engineering (Overpass + land cover + Open-Meteo), GBM inference,

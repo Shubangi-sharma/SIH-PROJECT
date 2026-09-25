@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { BookOpen, Flame, SlidersHorizontal } from "lucide-react";
+import { BookOpen, Factory, Flame, SlidersHorizontal } from "lucide-react";
 import PyroLoader from "./PyroLoader";
 import {
   FacilityAnalysis,
@@ -34,7 +34,7 @@ export type MapMode = "india" | "global";
  * facility-boundaries toggle is gone too: boundaries were never rendered,
  * so the button lied.
  */
-export type LayerId = "firms";
+export type LayerId = "firms" | "facilities";
 
 /** PDF §3 filter state — every control maps to a real field on the data. */
 export interface MapFilters {
@@ -54,6 +54,7 @@ export function frpBandIndex(frp: number): 0 | 1 | 2 {
 
 export const LAYERS: { id: LayerId; label: string; icon: React.ElementType }[] = [
   { id: "firms", label: "FIRMS live hotspots", icon: Flame },
+  { id: "facilities", label: "Monitored facilities", icon: Factory },
 ];
 
 const BASEMAP_PILL: { id: Basemap; label: string }[] = [
@@ -142,6 +143,7 @@ export default function MapCanvas({
           basemap={basemap}
           firmsHotspots={firmsHotspots}
           showFirms={showFirms && layers.firms}
+          showFacilities={layers.facilities}
           selectedHotspotKey={selectedHotspotKey}
           onSelectHotspot={onSelectHotspot ?? (() => {})}
           onTilesLoading={() => setTilesLoadingInternal(true)}
@@ -158,7 +160,7 @@ export default function MapCanvas({
         />
       )}
 
-      {/* Global Live badge — top-left, global mode only. Live data, not a
+      {/* Global Live badge - top-left, global mode only. Live data, not a
           simulation: no violet SIMULATION MODE treatment anymore (§4). */}
       {mode === "global" && (
         <div className="map-glass absolute left-4 top-4 z-[1000] rounded-lg px-2.5 py-1 font-mono text-xs uppercase tracking-wide text-accent-secondary">
@@ -229,7 +231,7 @@ export default function MapCanvas({
           ))}
         </div>
 
-        {/* row 3: layer toggles (FIRMS only — boundaries removed) */}
+        {/* row 3: layer toggles (FIRMS hotspots + monitored facilities) */}
         <div className="flex flex-col gap-2">
           {LAYERS.map(({ id, label, icon: Icon }) => (
             <button
@@ -366,7 +368,7 @@ export default function MapCanvas({
           ))}
         </div>
 
-        {/* FRP scale for the FIRMS hotspot layer — only meaningful when that
+        {/* FRP scale for the FIRMS hotspot layer - only meaningful when that
             layer is on; hidden otherwise so the legend never lies */}
         {showFirms && layers.firms && (
           <>
@@ -385,7 +387,7 @@ export default function MapCanvas({
               ))}
             </div>
             <div className="mt-2 font-body text-[10px] leading-snug text-text-tertiary">
-              Fire radiative power — bigger/hotter fires
+              Fire radiative power - bigger/hotter fires
             </div>
           </>
         )}

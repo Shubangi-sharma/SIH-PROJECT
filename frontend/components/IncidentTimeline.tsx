@@ -46,7 +46,7 @@ export default function IncidentTimeline({
 
       {events.length === 0 ? (
         <p className="mt-3 rounded-lg border border-border-hairline bg-bg-raised px-3 py-2 text-xs leading-relaxed text-text-secondary">
-          No detections in the stored history for this facility yet — the
+          No detections in the stored history for this facility yet - the
           timeline fills in as FIRMS observations arrive.
         </p>
       ) : (
@@ -74,7 +74,7 @@ export default function IncidentTimeline({
 
                 <div className="flex items-center gap-2 pl-1.5">
                   <StatusGlyph status={ev.severity} size={8} className="flex-shrink-0" />
-                  {/* mono timestamp — the anchor of each row */}
+                  {/* mono timestamp - the anchor of each row */}
                   <span
                     className={clsx(
                       "font-mono text-[11px] font-medium",
@@ -95,7 +95,7 @@ export default function IncidentTimeline({
                   )}
                 </div>
 
-                {/* event text — own line, full width, comfortably readable */}
+                {/* event text - own line, full width, comfortably readable */}
                 <span
                   className={clsx(
                     "pl-1.5 font-body text-[13px] leading-snug",

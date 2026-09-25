@@ -81,7 +81,7 @@ export function FacilityTooltipContent({
 
   return (
     <div className="min-w-[240px] select-none">
-      {/* header — name + type/OSM id */}
+      {/* header - name + type/OSM id */}
       <div className="flex items-start gap-2">
         <div className="min-w-0">
           <div className="font-display text-[13px] font-semibold leading-snug text-text-primary">
@@ -97,7 +97,7 @@ export function FacilityTooltipContent({
         </div>
       </div>
 
-      {/* score + key signal stats in a tinted strip — readable on any basemap */}
+      {/* score + key signal stats in a tinted strip - readable on any basemap */}
       <div
         className="mt-2.5 rounded-lg border border-border-hairline px-2.5 py-2"
         style={{ backgroundColor: "rgba(5, 7, 10, 0.55)" }}
@@ -116,10 +116,10 @@ export function FacilityTooltipContent({
             label="Detections (10d)"
             value={detectionCount > 0 ? `${detectionCount}` : "none"}
           />
-          <Row label="Latest FRP" value={latestFrp != null ? `${latestFrp.toFixed(1)} MW` : "—"} />
+          <Row label="Latest FRP" value={latestFrp != null ? `${latestFrp.toFixed(1)} MW` : "-"} />
           <Row
             label="Nearest detection"
-            value={nearestKm != null ? `${nearestKm.toFixed(1)} km` : "—"}
+            value={nearestKm != null ? `${nearestKm.toFixed(1)} km` : "-"}
           />
           <Row
             label="Coordinates"
@@ -253,7 +253,7 @@ export function FirmsHotspotDetail({ hotspot }: { hotspot: FirmsHotspot }) {
       </div>
       <p className="mt-3 border-t border-border-hairline pt-3 text-xs leading-relaxed text-text-secondary">
         Fire Radiative Power (FRP) measures the radiant heat output of the fire
-        in megawatts — higher FRP means a larger or hotter fire. VIIRS 375 m
+        in megawatts - higher FRP means a larger or hotter fire. VIIRS 375 m
         imagery reports these anomalies roughly every 3 hours; a cluster of
         detections over multiple days indicates persistent activity rather
         than a one-off event.

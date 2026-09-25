@@ -80,7 +80,7 @@ export const BASEMAPS: {
     id: "satellite",
     label: "Satellite",
     url: ESRI_IMAGERY_URL,
-    attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
+    attribution: 'Tiles &copy; Esri - Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
     className: "map-tiles-satellite",
   },
 ];
@@ -207,10 +207,12 @@ function getFacilityIcon(hex: string, selected: boolean): L.DivIcon {
 
 function getClusterIcon(hex: string, count: number): L.DivIcon {
   const size = Math.min(24 + count / 8, 44);
-  const key = `c:${hex}:${Math.round(size)}:${count > 99 ? "99+" : count}`;
+  // Real magnitude ("124", "1.2k") — capping at "99+" hid the actual count,
+  // so cluster bubbles disagreed with the timeline's live detection readout.
+  const label = count > 999 ? `${(count / 1000).toFixed(1)}k` : String(count);
+  const key = `c:${hex}:${Math.round(size)}:${label}`;
   let icon = iconCache.get(key);
   if (!icon) {
-    const label = count > 99 ? "99+" : String(count);
     icon = L.divIcon({
       html: `<div style="width:${size}px;height:${size}px;border-radius:9999px;display:flex;align-items:center;justify-content:center;background:${hex}2E;border:1.5px solid ${hex};color:${hex};font:600 11px var(--font-inter),sans-serif;box-shadow:0 0 10px ${hex}55;">${label}</div>`,
       className: "pyro-cluster",
@@ -400,6 +402,7 @@ export default function MapInner({
   basemap = "dark",
   firmsHotspots,
   showFirms,
+  showFacilities = true,
   selectedHotspotKey = null,
   onSelectHotspot,
   onTilesLoading,
@@ -414,6 +417,7 @@ export default function MapInner({
   basemap?: Basemap;
   firmsHotspots: FirmsHotspot[];
   showFirms: boolean;
+  showFacilities?: boolean;
   selectedHotspotKey?: string | null;
   onSelectHotspot: (key: string | null) => void;
   onTilesLoading: () => void;
@@ -451,7 +455,7 @@ export default function MapInner({
       {showFirms && firmsHotspots.length > 0 && (
         <FirmsLayer hotspots={firmsHotspots} selectedHotspotKey={selectedHotspotKey} onSelectHotspot={onSelectHotspot} />
       )}
-      <FacilitiesLayer analyses={analyses} selectedId={selectedId} onSelect={onSelect} />
+      {showFacilities && <FacilitiesLayer analyses={analyses} selectedId={selectedId} onSelect={onSelect} />}
     </MapContainer>
   );
 }

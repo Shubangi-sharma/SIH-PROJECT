@@ -23,7 +23,7 @@ export default function HealthScoreRing({
     <div
       className="flex flex-col items-center gap-3"
       role="img"
-      aria-label={`Thermal health score ${score} of 100 — ${status}`}
+      aria-label={`Thermal health score ${score} of 100 - ${status}`}
     >
       <div className="relative" style={{ width: SIZE, height: SIZE }}>
         <svg width={SIZE} height={SIZE} className="-rotate-90">

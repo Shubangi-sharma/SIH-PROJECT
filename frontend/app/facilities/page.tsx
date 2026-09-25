@@ -39,13 +39,6 @@ const SEVERITY_RANK: Record<RiskStatus, number> = {
  */
 const PAGE_SIZE = 30;
 
-/** Skeleton card matching the real card layout (design.md, no spinners). */
-function CardSkeleton() {
-  return (
-    <div className="h-[132px] animate-pulse rounded-xl bg-bg-surface" aria-hidden />
-  );
-}
-
 /**
  * content-visibility lets the browser skip layout/paint for cards scrolled
  * out of view — the same lever as pagination, applied per-card, so even the
@@ -71,31 +64,43 @@ const FacilityCard = React.memo(function FacilityCard({
     <Link
       href={`/facilities/${f.id}`}
       style={cardContentVisibilityStyle}
-      className="dash-card group relative flex flex-col gap-3 overflow-hidden rounded-xl p-5 transition-colors duration-150 hover:bg-bg-raised"
+      className="dash-card dash-stat group relative flex flex-col gap-3 overflow-hidden rounded-xl p-5"
     >
+      {/* status accent - glow bar echoing the dashboard stat cards */}
       <span
         aria-hidden
-        className="absolute left-0 top-0 h-full w-1"
-        style={{ backgroundColor: hex }}
+        className="absolute left-0 top-0 h-full w-[3px] rounded-l"
+        style={{
+          backgroundColor: hex,
+          boxShadow: `0 0 12px ${hex}66`,
+        }}
       />
-      <div className="flex items-center justify-between gap-2">
+      <div
+        aria-hidden
+        className="absolute inset-x-0 top-0 h-px"
+        style={{
+          background: `linear-gradient(90deg, transparent 0%, ${hex}55 50%, transparent 100%)`,
+          opacity: 0.7,
+        }}
+      />
+      <div className="relative flex items-center justify-between gap-2">
         <span className="truncate font-display text-sm font-semibold text-text-primary">
           {f.name}
         </span>
-        <StatusGlyph status={status} size={8} className="flex-shrink-0" />
+        <StatusGlyph status={status} size={9} className="flex-shrink-0" />
       </div>
-      <p className="text-xs text-text-secondary">
+      <p className="relative text-xs text-text-secondary">
         {f.type} · {f.source === "osm" ? "OpenStreetMap" : f.source}
       </p>
-      <div className="mt-auto flex items-baseline gap-3 pt-1 font-mono text-xs">
-        <span className="text-text-primary">HS {analysis.score}</span>
+      <div className="relative mt-auto flex items-baseline gap-3 pt-1 font-mono text-xs">
+        <span style={{ color: hex }}>HS {analysis.score}</span>
         <span className="text-text-tertiary">
           {analysis.detectionCount > 0
             ? `${analysis.detectionCount} det`
             : "quiet"}
         </span>
         <span className="ml-auto text-text-tertiary">
-          {analysis.latestFrp != null ? `${analysis.latestFrp.toFixed(0)} MW` : "—"}
+          {analysis.latestFrp != null ? `${analysis.latestFrp.toFixed(0)} MW` : "-"}
         </span>
       </div>
     </Link>
@@ -215,11 +220,17 @@ function FacilitiesBody() {
 
         <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {isLoading
-            ? Array.from({ length: 8 }).map((_, i) => <CardSkeleton key={i} />)
+            ? Array.from({ length: 8 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="skeleton-shimmer h-[132px] rounded-xl"
+                  aria-hidden
+                />
+              ))
             : paged.map((a) => <FacilityCard key={a.facility.id} analysis={a} />)}
         </section>
 
-        {/* Load more — mounts the next PAGE_SIZE slice instead of rendering
+        {/* Load more - mounts the next PAGE_SIZE slice instead of rendering
             every match at once (keeps the grid cheap with 100s of sites). */}
         {hasMore && (
           <div className="flex flex-col items-center gap-2">
@@ -239,7 +250,7 @@ function FacilitiesBody() {
         {!isLoading && error && (
           <div className="rounded-xl bg-bg-surface p-10 text-center">
             <p className="text-sm text-text-secondary">
-              Facility feed unavailable — the backend could not be reached. Retrying
+              Facility feed unavailable - the backend could not be reached. Retrying
               automatically.
             </p>
           </div>

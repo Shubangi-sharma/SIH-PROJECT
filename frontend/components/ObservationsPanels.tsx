@@ -10,9 +10,11 @@
  * page's feature-provenance styling.
  */
 
-import React, { useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2, Loader2 } from "lucide-react";
+import React from "react";
+import useSWR from "swr";
+import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import clsx from "clsx";
+import PyroLoader from "./PyroLoader";
 import { fetchObservations, type ObservationsResponseDto } from "@/lib/mlApi";
 
 const LC_LABELS: Record<string, string> = {
@@ -107,7 +109,7 @@ function LandCoverBody({ lc }: { lc: ObservationsResponseDto["land_cover"] }) {
               key={cls}
               className="h-full"
               style={{ width: `${((v ?? 0) / total) * 100}%`, backgroundColor: LC_COLORS[cls] ?? "#8E8A80" }}
-              title={`${LC_LABELS[cls] ?? cls} — ${(((v ?? 0) / total) * 100).toFixed(1)}%`}
+              title={`${LC_LABELS[cls] ?? cls} - ${(((v ?? 0) / total) * 100).toFixed(1)}%`}
             />
           ))}
       </div>
@@ -122,7 +124,7 @@ function LandCoverBody({ lc }: { lc: ObservationsResponseDto["land_cover"] }) {
               <span className="truncate">{LC_LABELS[cls] ?? cls}</span>
             </span>
             <span className="font-mono text-[11px] text-text-primary">
-              {v == null ? "—" : `${Math.round(v * 100)}%`}
+              {v == null ? "-" : `${Math.round(v * 100)}%`}
             </span>
           </div>
         ))}
@@ -145,7 +147,7 @@ function SurroundingsBody({ s }: { s: ObservationsResponseDto["surroundings"] })
           <MonoStat
             key={key}
             label={DISTANCE_LABELS[key] ?? key}
-            value={v == null ? "—" : v < 1 ? `${Math.round(v * 1000)} m` : `${v.toFixed(1)} km`}
+            value={v == null ? "-" : v < 1 ? `${Math.round(v * 1000)} m` : `${v.toFixed(1)} km`}
           />
         ))}
       </div>
@@ -178,7 +180,7 @@ function WeatherBody({ w }: { w: ObservationsResponseDto["weather"] }) {
       {WEATHER_ROWS.map(({ key, label, unit }) => {
         const v = w[key];
         return (
-          <MonoStat key={String(key)} label={label} value={v == null ? "—" : `${v.toFixed(1)} ${unit}`} />
+          <MonoStat key={String(key)} label={label} value={v == null ? "-" : `${v.toFixed(1)} ${unit}`} />
         );
       })}
     </div>
@@ -186,34 +188,29 @@ function WeatherBody({ w }: { w: ObservationsResponseDto["weather"] }) {
 }
 
 export default function ObservationsPanels({ lat, lng }: { lat: number; lng: number }) {
-  const [obs, setObs] = useState<ObservationsResponseDto | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  /* SWR instead of raw useEffect: results are cached per coordinate pair, so
+     returning to a facility (or comparing neighbours) renders instantly from
+     cache while a background revalidation refreshes. keepPreviousData keeps
+     the previous point's panels visible (labelled by its own timestamp)
+     instead of flashing a loader on every navigation. */
+  const { data: obs, error, isLoading } = useSWR<ObservationsResponseDto>(
+    ["ml-observations", lat, lng] as const,
+    ([, latK, lngK]: readonly [string, number, number]) => fetchObservations(latK, lngK),
+    {
+      revalidateOnFocus: false,
+      keepPreviousData: true,
+      dedupingInterval: 60_000,
+    },
+  );
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    setObs(null);
-    fetchObservations(lat, lng)
-      .then((r) => {
-        if (!cancelled) setObs(r);
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Observations unavailable.");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [lat, lng]);
-
-  if (loading) {
+  if (isLoading) {
     return (
-      <section className="flex items-center gap-2 rounded-xl bg-bg-surface px-5 py-4">
-        <Loader2 size={14} className="animate-spin text-accent-primary" />
-        <span className="text-xs text-text-secondary">
-          Computing land cover, surroundings &amp; weather for this point…
-        </span>
+      <section className="dash-card flex items-center justify-center rounded-xl px-5 py-12">
+        <PyroLoader
+          label="Reading the environment"
+          sub="Land cover, nearby infrastructure and recent weather for this point, computed live by the ML service"
+          compact
+        />
       </section>
     );
   }
@@ -223,8 +220,8 @@ export default function ObservationsPanels({ lat, lng }: { lat: number; lng: num
       <section className="dash-card rounded-xl p-5">
         <h3 className="font-display text-sm font-semibold text-text-primary">Environment observations</h3>
         <p className="mt-3 rounded-lg border border-border-hairline bg-bg-raised px-3 py-2 text-xs leading-relaxed text-text-secondary">
-          {error} — land cover, surroundings and weather are computed live by the
-          ML service; ensure it is reachable.
+          {error instanceof Error ? error.message : "Observations unavailable."} The
+          ML service computes these live; check that it is reachable and retry.
         </p>
       </section>
     );

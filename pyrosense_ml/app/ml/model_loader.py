@@ -1,6 +1,6 @@
 """Model loader — loads MLP classifier + OLD GBM + 3 GRU risk models ONCE at startup.
 
-Contract (Phase 2A + decision (b), see docs/CLASSIFIER_DECISION.md):
+Contract (Phase 2A + decision (b), see docs/decisions-and-faq.md):
 - Seven artifacts load together into ONE cached LoadedModels object: the Keras
   classifier, its scaler, its label encoder, the OLD Gradient Boosting
   pipeline (kept per decision (b) — callable via model_version="old"), the
@@ -54,7 +54,7 @@ RISK_MODEL_PATHS = {
     "3day": os.path.join(_DATA_SCIENCE, "risk_prediction", "models", "gru_3day_best.keras"),
     "7day": os.path.join(_DATA_SCIENCE, "risk_prediction", "models", "gru_7day_best.keras"),
 }
-# OLD GBM kept per docs/CLASSIFIER_DECISION.md decision (b): model_version="old".
+# OLD GBM kept per docs/decisions-and-faq.md decision (b): model_version="old".
 GBM_MODEL_PATH = os.path.join(_REPO_ROOT, "FINAL_GRADIENT_BOOSTING_MODEL.pkl")
 
 

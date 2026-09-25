@@ -63,9 +63,9 @@ export default function FreshnessBadge({
       role="status"
       title={
         stale
-          ? "Serving the last known good data — the ML service is unreachable"
+          ? "Serving the last known good data - the ML service is unreachable"
           : cached
-            ? "Served from cache — same data as the previous request"
+            ? "Served from cache - same data as the previous request"
             : undefined
       }
       className={clsx(

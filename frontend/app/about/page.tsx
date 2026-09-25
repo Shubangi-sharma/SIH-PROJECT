@@ -60,7 +60,7 @@ export default function AboutPage() {
           <p className="mt-1 max-w-2xl text-sm leading-relaxed text-text-secondary">
             An end-to-end platform for detecting, classifying, and prioritizing
             industrial thermal anomalies using NASA satellite data and machine
-            learning — grounded entirely in real observations.
+            learning - grounded entirely in real observations.
           </p>
         </header>
 
@@ -76,7 +76,7 @@ export default function AboutPage() {
               </p>
               <p className="mt-1.5">
                 Pure presentation layer. No secrets, no computation, no
-                direct database access — every number on every page arrives
+                direct database access - every number on every page arrives
                 from a backend API call.
               </p>
             </InfoCard>

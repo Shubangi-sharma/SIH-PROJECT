@@ -6,7 +6,7 @@
  * Transport is ALWAYS the Node backend's pass-through proxy (POST
  * /api/predict, GET /api/ml/hotspots) — the browser never talks to the ML
  * service directly and never sees a second origin. The DTOs below mirror
- * pyrosense_ml's FastAPI responses verbatim (docs/api-contract.md):
+ * pyrosense_ml's FastAPI responses verbatim (see backend/src/routes/predict.route.ts):
  * the backend proxies pass-through, so this is the single definition.
  *
  * The frontend never engineers features and never fills the 36-feature

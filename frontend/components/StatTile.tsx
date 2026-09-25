@@ -51,7 +51,7 @@ export default function StatTile({
               : "text-text-primary",
         )}
       >
-        {loading ? "—" : value}
+        {loading ? "-" : value}
       </div>
       <div className="mt-2 flex items-center gap-1.5">
         {toneStatus && <StatusGlyph status={toneStatus} size={7} />}

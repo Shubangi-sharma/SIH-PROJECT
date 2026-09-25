@@ -1,21 +1,17 @@
 "use client";
 
 /**
- * Predict page — Hotspot Classification (SIH brief §6–§9).
+ * Hotspot Classifier (formerly "Predict") — classify any point on Earth.
  *
- * Collects ONLY the brief's recommended fields (lat, lng, optional region
- * tag); every model feature is engineered server-side by pyrosense_ml's
- * auto mode. The result renders under the exact "Predicted Hotspot
- * Category" heading, visually distinct from the monitoring backend's
- * rule-based Risk Status vocabulary.
+ * Two ways in:
+ *  1. Type coordinates; the ML service engineers the full 43-feature vector
+ *     server-side (auto mode) and classifies the point.
+ *  2. Don't know exact coordinates? Nearby FIRMS detections (50 km radius)
+ *     are offered as one-click fills — pick a live hotspot and classify it.
  *
- * Real-time mode: a valid coordinate pair auto-classifies (debounced) —
- * no button press required. A stale-response guard (monotonic request id)
- * keeps the rendered result equal to the latest submitted coordinates.
- *
- * Data flow (§7): form → backend proxy → pyrosense_ml feature engineering →
- * same preprocessing → model → prediction + explanation → this result view.
- * No mock numbers: every value shown comes from the response.
+ * Real-time mode: a valid coordinate pair auto-classifies (debounced). A
+ * stale-response guard (monotonic request id) keeps the rendered result
+ * equal to the latest submitted coordinates.
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
@@ -45,11 +41,19 @@ import {
   formatFeatureValue,
   featureLabel,
 } from "@/lib/features";
+import { useFirms } from "@/lib/hooks";
+import { INDIA_BBOX } from "@/lib/regions";
+import { haversineKm } from "@/lib/geo";
+import type { FirmsHotspot } from "@/lib/firms";
+import PyroLoader from "@/components/PyroLoader";
+
+/** Nearby-detection search radius in km (user-confirmed choice). */
+const NEARBY_RADIUS_KM = 50;
 
 /**
- * One coordinate box — "lat, lng" in a single field (§6 fields unchanged:
- * latitude and longitude are still the only required inputs). Latitude
- * first, strict validation, and a live preview of the parsed pair.
+ * One coordinate box — "lat, lng" in a single field (latitude and longitude
+ * are the only required inputs). Latitude first, strict validation, and a
+ * live preview of the parsed pair.
  */
 function CoordinatesField({
   value,
@@ -73,8 +77,8 @@ function CoordinatesField({
       </div>
       <div
         className={clsx(
-          "mt-1.5 flex items-center rounded-lg border bg-bg-inset transition-colors duration-150",
-          error ? "border-status-critical" : "border-border-hairline focus-within:border-accent-primary",
+          "mt-1.5 flex items-center rounded-lg border bg-white/[0.03] transition-colors duration-150",
+          error ? "border-status-critical" : "border-white/[0.08] focus-within:border-accent-primary",
         )}
       >
         <MapPin size={14} className="ml-3 flex-shrink-0 text-text-tertiary" />
@@ -94,10 +98,42 @@ function CoordinatesField({
         <span className="mt-1 block text-[11px] text-status-critical">{error}</span>
       ) : parsed ? (
         <span className="mt-1 block font-mono text-[11px] text-text-tertiary">
-          {parsed.lat.toFixed(4)}°, {parsed.lng.toFixed(4)}° — classifying automatically…
+          {parsed.lat.toFixed(4)}°, {parsed.lng.toFixed(4)}° - classifying automatically…
         </span>
       ) : null}
     </div>
+  );
+}
+
+/** One nearby live detection — click to fill the coordinate box. */
+function NearbyHotspot({
+  h,
+  distKm,
+  onPick,
+}: {
+  h: FirmsHotspot;
+  distKm: number;
+  onPick: (lat: number, lng: number) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onPick(h.latitude, h.longitude)}
+      className="map-glass group flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-all duration-200 hover:-translate-y-px"
+    >
+      <Satellite size={12} className="flex-shrink-0 text-accent-secondary" />
+      <span className="min-w-0 flex-1">
+        <span className="block font-mono text-[11px] text-text-primary">
+          {h.latitude.toFixed(3)}°, {h.longitude.toFixed(3)}°
+        </span>
+        <span className="block text-[10px] text-text-tertiary">
+          {h.acqDate} · FRP {h.frp.toFixed(1)} MW · {h.confidence.trim() || "n/a"} confidence
+        </span>
+      </span>
+      <span className="flex-shrink-0 rounded-full bg-white/[0.05] px-2 py-0.5 font-mono text-[10px] text-text-secondary">
+        {distKm.toFixed(1)} km
+      </span>
+    </button>
   );
 }
 
@@ -131,7 +167,7 @@ function ProbabilityBar({
           {pct.toFixed(1)}%
         </span>
       </div>
-      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-bg-raised">
+      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
         <div
           className="h-full rounded-full transition-all duration-500"
           style={{ width: `${Math.min(100, Math.max(0, pct))}%`, backgroundColor: hex }}
@@ -142,9 +178,8 @@ function ProbabilityBar({
 }
 
 /**
- * Confidence distribution (Track A3) — a single stacked bar of the four
- * class probabilities, exactly as the backend returned them (values are
- * rendered, never recomputed). The winning segment is outlined and labelled.
+ * Confidence distribution — a single stacked bar of the class probabilities,
+ * exactly as the backend returned them. The winning segment is outlined.
  */
 function ConfidenceDistribution({
   probabilities,
@@ -164,7 +199,7 @@ function ConfidenceDistribution({
         <span className="font-mono text-[10px] text-text-tertiary">Σ 100%</span>
       </div>
       <div
-        className="mt-1.5 flex h-3 w-full overflow-hidden rounded-full bg-bg-raised"
+        className="mt-1.5 flex h-3 w-full overflow-hidden rounded-full bg-white/[0.06]"
         role="img"
         aria-label={MODEL_CLASSES.map(
           (c) => `${MODEL_CLASS_LABELS[c]} ${((probabilities[c] ?? 0) * 100).toFixed(1)}%`,
@@ -184,7 +219,7 @@ function ConfidenceDistribution({
                 outline: winner ? "1.5px solid #E6EBF2" : undefined,
                 outlineOffset: winner ? "-1.5px" : undefined,
               }}
-              title={`${MODEL_CLASS_LABELS[c]} — ${(p * 100).toFixed(1)}%${winner ? " (predicted)" : ""}`}
+              title={`${MODEL_CLASS_LABELS[c]} - ${(p * 100).toFixed(1)}%${winner ? " (predicted)" : ""}`}
             />
           );
         })}
@@ -194,14 +229,9 @@ function ConfidenceDistribution({
 }
 
 /**
- * Explainability panel (Track A1) — one row per top_contributing_features
- * entry, sorted by contribution score descending (the backend already sorts;
- * the guard keeps it true even if a cached payload arrives unsorted).
- *
- * Contribution = importance × deviation vs the training median, exactly as
- * risk_score.py::key_contributors computes it — re-derived for display only,
- * never fed back into anything. The bar's width is the feature's share of
- * Σ(contributions) so the picture is proportional, not absolute.
+ * Explainability panel — one row per top_contributing_features entry.
+ * Contribution = importance × deviation vs the training median, re-derived
+ * for display only, never fed back into anything.
  */
 function ExplainabilityCard({
   features,
@@ -210,12 +240,12 @@ function ExplainabilityCard({
 }) {
   if (features.length === 0) {
     return (
-      <div className="rounded-xl dash-card p-5">
+      <div className="dash-card rounded-xl p-5">
         <h3 className="font-display text-sm font-semibold text-text-primary">
           Why this prediction
         </h3>
-        <p className="mt-2 rounded-lg border border-border-hairline bg-bg-raised px-3 py-2 text-xs leading-relaxed text-text-secondary">
-          No feature contributions were returned for this prediction — the model
+        <p className="mt-2 rounded-lg border border-border-hairline bg-white/[0.02] px-3 py-2 text-xs leading-relaxed text-text-secondary">
+          No feature contributions were returned for this prediction - the model
           could not attribute this result to specific inputs.
         </p>
       </div>
@@ -231,7 +261,7 @@ function ExplainabilityCard({
   const sum = withScore.reduce((a, f) => a + f.contribution, 0) || 1;
 
   return (
-    <div className="rounded-xl dash-card p-5">
+    <div className="dash-card rounded-xl p-5">
       <h3 className="font-display text-sm font-semibold text-text-primary">
         Why this prediction
       </h3>
@@ -255,9 +285,8 @@ function ExplainabilityCard({
                   {typeof f.value === "number" ? formatFeatureValue(f.value) : f.value}
                 </span>
               </div>
-              {/* contribution bar — real share, real score */}
               <div className="mt-1.5 flex items-center gap-2">
-                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-bg-raised">
+                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/[0.06]">
                   <div
                     className="h-full rounded-full bg-accent-violet transition-all duration-500"
                     style={{ width: `${Math.min(100, share)}%` }}
@@ -281,7 +310,7 @@ function ExplainabilityCard({
 /** Small mono readout (matches the facility pages' MonoStat style). */
 function MonoStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-border-hairline bg-bg-inset px-2.5 py-2">
+    <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-2.5 py-2">
       <div className="text-[10px] uppercase tracking-wider text-text-tertiary">{label}</div>
       <div className="mt-0.5 truncate font-mono text-xs text-text-primary">{value}</div>
     </div>
@@ -312,7 +341,7 @@ export default function PredictPage() {
   }, [coords]);
 
   const validationError = useMemo(() => {
-    if (coords.trim() === "") return null; // idle state — not an error
+    if (coords.trim() === "") return null; // idle state, not an error
     if (!parsed) return "Enter latitude, longitude (e.g. 30.7333, 76.7794).";
     return null;
   }, [coords, parsed]);
@@ -359,120 +388,164 @@ export default function PredictPage() {
     setError(null);
   }, []);
 
-  /** Paste helper — keep the full form visible; the map documents the workflow. */
-  const useMapCoordinates = useCallback(() => {
-    window.open("/map", "_blank");
-  }, []);
+  /** Nearby live detections (50 km) offered as one-click coordinate fills. */
+  const { hotspots } = useFirms([INDIA_BBOX]);
+  const nearby = useMemo(() => {
+    if (!parsed) return [];
+    return hotspots
+      .map((h) => ({
+        h,
+        distKm: haversineKm(parsed.lat, parsed.lng, h.latitude, h.longitude),
+      }))
+      .filter((x) => x.distKm <= NEARBY_RADIUS_KM)
+      .sort((a, b) => a.distKm - b.distKm)
+      .slice(0, 6);
+  }, [parsed, hotspots]);
 
   return (
     <div className="pyro-scroll h-full overflow-y-auto bg-gradient-mesh">
       <div className="mx-auto flex max-w-[1100px] flex-col gap-6 p-6 pb-20">
         <header className="pt-4 dash-section" style={{ animationDelay: "0.05s" }}>
           <h1 className="font-display text-2xl font-semibold text-text-primary">
-            Hotspot Classification
+            Hotspot Classifier
           </h1>
           <p className="mt-1 max-w-3xl text-sm leading-relaxed text-text-secondary">
-            Submit a hotspot&apos;s location and the ML service engineers the
-            full model feature vector — detection persistence, FRP statistics,
-            distances to infrastructure, land cover, weather — then classifies
-            it with a grounded explanation. Feature engineering and
-            preprocessing happen entirely server-side.
+            Submit any location and the ML service engineers the full model
+            feature vector - detection persistence, FRP statistics, distances to
+            infrastructure, land cover, weather - then classifies it with a
+            grounded explanation. Exact coordinates aren&apos;t required: live
+            detections near your point are offered below the input.
           </p>
         </header>
 
         <div className="grid gap-6 lg:grid-cols-[420px_1fr]">
-          {/* ── input form (PDF §6 recommended fields only) ─────────────── */}
-          <section className="dash-card rounded-xl p-5 dash-section" style={{ animationDelay: "0.1s" }}>
-            <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-text-secondary">
-              Hotspot input
-            </h2>
-            <form className="mt-4 flex flex-col gap-4" onSubmit={handleSubmit} noValidate>
-              <CoordinatesField
-                value={coords}
-                onChange={(v) => {
-                  setCoords(v);
-                  setError(null);
-                }}
-                error={validationError}
-                parsed={parsed}
-              />
-              <label className="block">
-                <span className="text-[11px] font-semibold uppercase tracking-widest text-text-tertiary">
-                  Region tag
-                </span>
-                <select
-                  value={region}
-                  onChange={(e) => setRegion(e.target.value)}
-                  className="mt-1.5 w-full rounded-lg border border-border-hairline bg-bg-inset px-3 py-2 text-sm text-text-primary outline-none transition-colors duration-150 focus:border-accent-primary"
-                >
-                  <option value="india">India</option>
-                  <option value="global">Global</option>
-                </select>
-              </label>
+          {/* ── input column ─────────────────────────────────────────── */}
+          <div className="flex flex-col gap-4">
+            <section className="dash-card rounded-xl p-5 dash-section" style={{ animationDelay: "0.1s" }}>
+              <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-text-secondary">
+                Point input
+              </h2>
+              <form className="mt-4 flex flex-col gap-4" onSubmit={handleSubmit} noValidate>
+                <CoordinatesField
+                  value={coords}
+                  onChange={(v) => {
+                    setCoords(v);
+                    setError(null);
+                  }}
+                  error={validationError}
+                  parsed={parsed}
+                />
+                <label className="block">
+                  <span className="text-[11px] font-semibold uppercase tracking-widest text-text-tertiary">
+                    Region tag
+                  </span>
+                  <select
+                    value={region}
+                    onChange={(e) => setRegion(e.target.value)}
+                    className="mt-1.5 w-full rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-sm text-text-primary outline-none transition-colors duration-150 focus:border-accent-primary"
+                  >
+                    <option value="india">India</option>
+                    <option value="global">Global</option>
+                  </select>
+                </label>
 
-              <div className="flex items-center gap-2">
-                <button
-                  type="submit"
-                  disabled={!parsed || submitting}
-                  className={clsx(
-                    "flex flex-1 items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium transition-colors duration-150",
-                    parsed && !submitting
-                      ? "bg-accent-primary/20 text-accent-primary hover:bg-accent-primary/30"
-                      : "cursor-not-allowed bg-bg-raised text-text-tertiary",
-                  )}
-                >
-                  {submitting ? (
-                    <>
-                      <Loader2 size={15} className="animate-spin" />
-                      Classifying…
-                    </>
-                  ) : (
-                    <>
-                      <Crosshair size={15} />
-                      Classify hotspot
-                    </>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={useMapCoordinates}
-                  title="Open the Live Map to pick a hotspot's coordinates"
-                  className="flex h-[42px] w-[42px] items-center justify-center rounded-lg border border-border-hairline text-text-secondary transition-colors duration-150 hover:border-border-strong hover:text-text-primary"
-                >
-                  <MapPin size={15} />
-                </button>
-              </div>
-              <p className="text-[11px] leading-relaxed text-text-tertiary">
-                Only the fields the brief recommends are collected — the other
-                features are derived from FIRMS history, OSM, land cover, and
-                weather archives for that exact point (fetched in parallel).
-                Classification starts automatically as you type — no button
-                needed. First run for a fresh area can still take a few seconds
-                while external sources are queried; repeats are served from cache.
-              </p>
-            </form>
-          </section>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="submit"
+                    disabled={!parsed || submitting}
+                    className={clsx(
+                      "flex flex-1 items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium transition-colors duration-150",
+                      parsed && !submitting
+                        ? "bg-accent-primary/20 text-accent-primary ring-1 ring-accent-primary/40 hover:bg-accent-primary/30"
+                        : "cursor-not-allowed bg-white/[0.04] text-text-tertiary",
+                    )}
+                  >
+                    {submitting ? (
+                      <>
+                        <Loader2 size={15} className="animate-spin" />
+                        Classifying…
+                      </>
+                    ) : (
+                      <>
+                        <Crosshair size={15} />
+                        Classify hotspot
+                      </>
+                    )}
+                  </button>
+                  <Link
+                    href="/map"
+                    title="Open the Hotspot Map to pick a location"
+                    className="flex h-[42px] w-[42px] items-center justify-center rounded-lg border border-white/[0.08] text-text-secondary transition-colors duration-150 hover:border-border-strong hover:text-text-primary"
+                  >
+                    <MapPin size={15} />
+                  </Link>
+                </div>
+                <p className="text-[11px] leading-relaxed text-text-tertiary">
+                  Only coordinates are collected - the other features are derived
+                  from FIRMS history, OSM, land cover, and weather archives for
+                  that exact point. Classification starts automatically as you
+                  type; first run for a fresh area takes a few seconds while
+                  external sources are queried, repeats come from cache.
+                </p>
+              </form>
+            </section>
 
-          {/* ── result view (PDF §8) ────────────────────────────────────── */}
+            {/* nearby live detections - the "I don't know exact coords" path */}
+            {parsed && (
+              <section className="dash-card rounded-xl p-5 dash-section" style={{ animationDelay: "0.15s" }}>
+                <div className="flex items-center justify-between">
+                  <h2 className="font-display text-sm font-semibold text-text-primary">
+                    Live detections nearby
+                  </h2>
+                  <span className="rounded-full bg-white/[0.05] px-2 py-0.5 font-mono text-[10px] text-text-secondary">
+                    within {NEARBY_RADIUS_KM} km
+                  </span>
+                </div>
+                {nearby.length === 0 ? (
+                  <p className="mt-3 text-xs leading-relaxed text-text-tertiary">
+                    No live FIRMS detections within {NEARBY_RADIUS_KM} km of this
+                    point in the current 10-day window. The classifier still
+                    works - it evaluates the point&apos;s environment and fire
+                    history regardless.
+                  </p>
+                ) : (
+                  <>
+                    <p className="mt-1.5 text-[11px] leading-relaxed text-text-tertiary">
+                      Not sure of the exact coordinates? Pick a live detection to
+                      fill them in.
+                    </p>
+                    <div className="mt-3 flex flex-col gap-2">
+                      {nearby.map(({ h, distKm }) => (
+                        <NearbyHotspot
+                          key={`${h.latitude},${h.longitude}`}
+                          h={h}
+                          distKm={distKm}
+                          onPick={(lat, lng) => setCoords(`${lat.toFixed(4)}, ${lng.toFixed(4)}`)}
+                        />
+                      ))}
+                    </div>
+                  </>
+                )}
+              </section>
+            )}
+          </div>
+
+          {/* ── result view ──────────────────────────────────────────── */}
           <section aria-live="polite" className="min-w-0">
             {submitting && (
-              <div className="flex h-full min-h-[420px] flex-col items-center justify-center gap-3 rounded-xl bg-bg-surface">
-                <Loader2 size={22} className="animate-spin text-accent-primary" />
-                <p className="text-sm text-text-secondary">
-                  Engineering features &amp; running the model…
-                </p>
-                <p className="max-w-xs text-center text-[11px] leading-relaxed text-text-tertiary">
-                  Querying FIRMS history, OSM infrastructure, land cover, and
-                  weather for this exact point.
-                </p>
+              <div className="flex h-full min-h-[420px] items-center justify-center rounded-xl dash-card">
+                <PyroLoader
+                  label="Engineering features & running the model"
+                  sub="Querying FIRMS history, OSM infrastructure, land cover, and weather for this exact point"
+                />
               </div>
             )}
 
             {!submitting && error && (
-              <div className="flex h-full min-h-[420px] flex-col items-center justify-center gap-3 rounded-xl border border-border-hairline bg-bg-surface p-8">
+              <div className="flex h-full min-h-[420px] flex-col items-center justify-center gap-3 rounded-xl dash-card p-8">
                 <AlertTriangle size={22} className="text-status-suspicious" />
                 <p className="text-sm font-medium text-text-primary">
-                  Prediction failed
+                  Classification failed
                 </p>
                 <p className="max-w-md break-words text-center text-xs leading-relaxed text-text-secondary">
                   {error}
@@ -480,7 +553,7 @@ export default function PredictPage() {
                 <button
                   type="button"
                   onClick={() => setError(null)}
-                  className="mt-1 rounded-lg border border-border-hairline px-3 py-1.5 text-xs text-text-secondary transition-colors duration-150 hover:border-border-strong hover:text-text-primary"
+                  className="mt-1 rounded-lg border border-white/[0.08] px-3 py-1.5 text-xs text-text-secondary transition-colors duration-150 hover:border-border-strong hover:text-text-primary"
                 >
                   Dismiss
                 </button>
@@ -488,14 +561,14 @@ export default function PredictPage() {
             )}
 
             {!submitting && !error && !result && (
-              <div className="flex h-full min-h-[420px] flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border-hairline bg-bg-surface/40 p-8 text-center">
+              <div className="flex h-full min-h-[420px] flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-white/[0.09] bg-white/[0.015] p-8 text-center">
                 <Crosshair size={20} className="text-text-tertiary" />
                 <p className="text-sm text-text-secondary">
-                  No prediction yet
+                  No classification yet
                 </p>
                 <p className="max-w-sm text-xs leading-relaxed text-text-tertiary">
-                  Type coordinates of a FIRMS hotspot (or any point of interest) —
-                  latitude, longitude — and the classifier runs automatically.
+                  Type coordinates of a FIRMS hotspot (or any point of interest) -
+                  latitude, longitude - and the classifier runs automatically.
                   The result appears here with per-class probabilities, key
                   drivers, and a grounded explanation.
                 </p>
@@ -504,9 +577,9 @@ export default function PredictPage() {
 
             {!submitting && !error && result && (
               <div className="flex flex-col gap-5 animation-fade-in">
-                {/* warnings — honest degradation notices */}
+                {/* warnings - honest degradation notices */}
                 {result.warnings.length > 0 && (
-                  <div className="rounded-xl border border-border-hairline bg-bg-surface p-4">
+                  <div className="dash-card rounded-xl p-4">
                     <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest text-status-watch">
                       <FileWarning size={12} />
                       Feature warnings
@@ -522,7 +595,7 @@ export default function PredictPage() {
                 )}
 
                 {/* headline: predicted category + confidence + risk */}
-                <div className="rounded-xl bg-bg-surface p-6">
+                <div className="dash-card rounded-xl p-6">
                   <div className="flex flex-wrap items-start justify-between gap-6">
                     <div className="min-w-0">
                       <div className="text-[10px] font-semibold uppercase tracking-widest text-text-tertiary">
@@ -552,13 +625,13 @@ export default function PredictPage() {
                         {result.risk_score == null ? (
                           <>
                             <span className="font-display text-3xl font-semibold text-text-tertiary">
-                              —
+                              -
                             </span>
                             <span className="mt-1 text-[10px] uppercase tracking-wider text-text-tertiary">
                               Risk score
                             </span>
                             <span className="mt-0.5 text-[9px] leading-tight text-text-tertiary">
-                              legacy build — unavailable
+                              legacy build - unavailable
                             </span>
                           </>
                         ) : (
@@ -588,8 +661,6 @@ export default function PredictPage() {
                     </div>
                   </div>
 
-                  {/* probabilities (Track A3) — stacked distribution + ranked rows,
-                      winning class highlighted. Values rendered verbatim. */}
                   <ConfidenceDistribution probabilities={result.probabilities} predictedClass={result.class} />
                   <div className="mt-4 grid gap-3 sm:grid-cols-2">
                     {MODEL_CLASSES.map((cls) => (
@@ -602,23 +673,23 @@ export default function PredictPage() {
                     ))}
                   </div>
 
-                  <p className="mt-4 border-t border-border-hairline pt-3 text-[11px] leading-relaxed text-text-tertiary">
+                  <p className="mt-4 border-t border-white/[0.06] pt-3 text-[11px] leading-relaxed text-text-tertiary">
                     This category is the trained model&apos;s supervised
-                    classification of the hotspot — distinct from the
+                    classification of the hotspot - distinct from the
                     rule-based Risk Status (Normal / Watch / Suspicious /
                     Critical) shown on facility pages.
                   </p>
                 </div>
 
-                {/* explanation — near the category, not buried (P1) */}
-                <div className="rounded-xl dash-card p-5">
+                {/* explanation - near the category, not buried */}
+                <div className="dash-card rounded-xl p-5">
                   <h3 className="flex items-center gap-2 font-display text-sm font-semibold text-text-primary">
                     Why this classification
                     <span
                       className={clsx(
                         "rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider",
                         result.explanation_provenance === "template"
-                          ? "bg-bg-raised text-text-tertiary"
+                          ? "bg-white/[0.05] text-text-tertiary"
                           : "bg-accent-secondary/15 text-accent-secondary",
                       )}
                     >
@@ -632,12 +703,11 @@ export default function PredictPage() {
                   </p>
                 </div>
 
-                {/* key drivers (Track A1) — explainability panel with real
-                    contribution bars, sorted descending, no raw JSON */}
+                {/* key drivers - explainability with real contribution bars */}
                 <ExplainabilityCard features={result.top_contributing_features} />
 
-                {/* analyzed location + input summary + timestamp (§8) */}
-                <div className="rounded-xl dash-card p-5">
+                {/* analyzed location + input summary + timestamp */}
+                <div className="dash-card rounded-xl p-5">
                   <h3 className="flex items-center gap-1.5 font-display text-sm font-semibold text-text-primary">
                     <Satellite size={14} className="text-accent-secondary" />
                     Analysis record
@@ -661,7 +731,7 @@ export default function PredictPage() {
                           "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium",
                           src === "median_fallback"
                             ? "bg-status-watch/15 text-status-watch"
-                            : "bg-bg-raised text-text-secondary",
+                            : "bg-white/[0.04] text-text-secondary",
                         )}
                       >
                         <CheckCircle2 size={9} aria-hidden />
@@ -671,16 +741,16 @@ export default function PredictPage() {
                   </div>
                   <div className="mt-4 flex flex-wrap gap-2">
                     <Link
-                      href={`/map`}
-                      className="flex items-center gap-1.5 rounded-lg border border-border-hairline bg-bg-raised px-3 py-1.5 text-xs text-text-secondary transition-colors duration-150 hover:border-border-strong hover:text-text-primary"
+                      href={`/map?lat=${result.latitude}&lng=${result.longitude}&zoom=12`}
+                      className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-xs text-text-secondary transition-colors duration-150 hover:border-border-strong hover:text-text-primary"
                     >
                       <MapPin size={12} />
-                      Inspect on Live Map
+                      Inspect on Hotspot Map
                     </Link>
                     <button
                       type="button"
                       onClick={reset}
-                      className="flex items-center gap-1.5 rounded-lg border border-border-hairline bg-bg-raised px-3 py-1.5 text-xs text-text-secondary transition-colors duration-150 hover:border-border-strong hover:text-text-primary"
+                      className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-xs text-text-secondary transition-colors duration-150 hover:border-border-strong hover:text-text-primary"
                     >
                       <RotateCcw size={12} />
                       Clear result
@@ -695,4 +765,3 @@ export default function PredictPage() {
     </div>
   );
 }
-

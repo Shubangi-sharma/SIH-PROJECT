@@ -49,5 +49,4 @@ Unique H3 cells are approximated by counting distinct rounded detection location
 
 - **Per-detection Classification API:** Currently, the API (per `api-reference.md`) only exposes hotspot classifications and risk-horizons for H3-cell clusters. The backend must expose a per-detection classification or a detection-to-cell join so the frontend detail drawer can display individual FIRMS hotspot types.
 - **Model Baseline Evaluation:** The old GBM classifier has no verified evaluation numbers on a held-out set. A proper side-by-side evaluation dataset needs to be established and run on the GBM to fairly compare it with the new MLP classifier.
-- **Compare Page Navigation:** The `/compare` route is fully functional but currently has no inbound link in the primary navigation items.
 - **Persistent Backend FIRMS Cache:** The Node.js backend maintains the rolling 10-day FIRMS history entirely in process memory. Swapping this out for a small local key-value store (like Redis or SQLite) behind the same route logic would allow warm 10-day windows to survive deployments and restarts.

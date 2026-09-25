@@ -4,7 +4,7 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
-import { ArrowLeft, Satellite } from "lucide-react";
+import { ArrowLeft, Map as MapIcon, Satellite } from "lucide-react";
 import { StatusBadge } from "@/lib/status";
 import SignalQualityBadge from "@/components/SignalQualityBadge";
 import HealthScoreRing from "@/components/HealthScoreRing";
@@ -13,6 +13,7 @@ import AiSummaryBlock from "@/components/AiSummaryBlock";
 import IncidentTimeline from "@/components/IncidentTimeline";
 import ObservationsPanels from "@/components/ObservationsPanels";
 import { fetchFacilityAnalysis, fetchSummary } from "@/lib/api";
+import PyroLoader from "@/components/PyroLoader";
 import { FacilityNarrative, RiskStatus } from "@/lib/types";
 import type { FacilityAnalysisResponseDto, SummaryResponseDto } from "@/lib/api";
 
@@ -52,7 +53,7 @@ function FieldGroupSection({
       {note && <p className="mt-1 text-[11px] leading-relaxed text-text-tertiary">{note}</p>}
       {empty ? (
         <p className="mt-3 rounded-lg border border-border-hairline bg-bg-raised px-3 py-2 text-xs leading-relaxed text-text-secondary">
-          Not measured for this facility — these observations are computed
+          Not measured for this facility - these observations are computed
           during ML feature engineering, not stored per facility. Run the
           Predict page on this facility&apos;s coordinates to generate them.
         </p>
@@ -66,7 +67,7 @@ function FieldGroupSection({
 /** Highest-count entry of a split map, e.g. satellites. */
 function topSplit(split: Record<string, number>): string {
   const entries = Object.entries(split);
-  if (entries.length === 0) return "—";
+  if (entries.length === 0) return "-";
   return entries.sort((a, b) => b[1] - a[1])[0]![0];
 }
 
@@ -118,15 +119,15 @@ export default function FacilityDetailPage() {
   const [satellite, setSatellite] = useState(false);
   useEffect(() => {
     document.title = facility
-      ? `${facility.name} — PYROSENSE`
-      : "Facility — PYROSENSE";
+      ? `${facility.name} - PYROSENSE`
+      : "Facility - PYROSENSE";
   }, [facility]);
 
   if (error) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 p-6">
         <p className="text-sm text-text-secondary">
-          Live facility feed unavailable — retrying automatically.
+          Live facility feed unavailable - retrying automatically.
         </p>
         <Link
           href="/facilities"
@@ -140,14 +141,11 @@ export default function FacilityDetailPage() {
 
   if (!analysis || !facility || !status || !cls) {
     return (
-      <div className="pyro-scroll h-full overflow-y-auto">
-        <div className="mx-auto flex max-w-[1200px] flex-col gap-6 p-6 pb-20">
-          <div className="h-10 w-56 animate-pulse rounded-lg bg-bg-surface" />
-          <div className="grid gap-6 lg:grid-cols-[380px_1fr]">
-            <div className="h-[420px] animate-pulse rounded-xl bg-bg-surface" />
-            <div className="h-[420px] animate-pulse rounded-xl bg-bg-surface" />
-          </div>
-        </div>
+      <div className="flex h-full items-center justify-center">
+        <PyroLoader
+          label="Loading facility dossier"
+          sub="Pulling the classification, narrative and detection history for this site"
+        />
       </div>
     );
   }
@@ -228,7 +226,7 @@ export default function FacilityDetailPage() {
               )}
             </section>
 
-            {/* locator mini-map — switchable to satellite imagery */}
+            {/* locator mini-map - switchable to satellite imagery */}
             <section className="flex flex-col gap-3">
               <div className="flex items-center justify-between px-1">
                 <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-text-secondary">
@@ -256,14 +254,27 @@ export default function FacilityDetailPage() {
                 Satellite imagery renders unfiltered for visual verification of
                 thermal signatures.
               </p>
+              {/* jump straight onto the Hotspot Map at this exact location */}
+              <Link
+                href={`/map?lat=${facility.lat}&lng=${facility.lng}&zoom=13`}
+                className="group flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-xs font-semibold text-white transition-all duration-200"
+                style={{
+                  background:
+                    "linear-gradient(135deg, rgba(91,155,213,0.32) 0%, rgba(79,179,179,0.28) 100%)",
+                  border: "1px solid rgba(91,155,213,0.4)",
+                }}
+              >
+                <MapIcon size={13} />
+                Open on Hotspot Map
+              </Link>
             </section>
           </div>
 
-          {/* RIGHT: narrative stack — computed by the backend, AI grounded in facts */}
+          {/* RIGHT: narrative stack - computed by the backend, AI grounded in facts */}
           <div className="flex min-w-0 flex-col gap-6">
             <WhatChangedPanel rows={narrative.whatChanged} />
 
-            {/* PDF §4: Persistence group — computed from the stored archive */}
+            {/* PDF §4: Persistence group - computed from the stored archive */}
             <FieldGroupSection title="Persistence">
               <MonoStat
                 label="Total detections"
@@ -271,33 +282,33 @@ export default function FacilityDetailPage() {
               />
               <MonoStat
                 label="Unique active days"
-                value={p.uniqueDays > 0 ? String(p.uniqueDays) : "—"}
+                value={p.uniqueDays > 0 ? String(p.uniqueDays) : "-"}
               />
               <MonoStat
                 label="Active duration"
-                value={p.activeDurationDays != null ? `${p.activeDurationDays} days` : "—"}
+                value={p.activeDurationDays != null ? `${p.activeDurationDays} days` : "-"}
               />
-              <MonoStat label="First detection" value={p.firstDetectionDate ?? "—"} />
-              <MonoStat label="Last detection" value={p.lastDetectionDate ?? "—"} />
+              <MonoStat label="First detection" value={p.firstDetectionDate ?? "-"} />
+              <MonoStat label="Last detection" value={p.lastDetectionDate ?? "-"} />
             </FieldGroupSection>
 
             {/* PDF §4: Fire characteristics group */}
             <FieldGroupSection title="Fire characteristics">
               <MonoStat
                 label="Mean FRP"
-                value={fc.meanFrp != null ? `${fc.meanFrp.toFixed(1)} MW` : "—"}
+                value={fc.meanFrp != null ? `${fc.meanFrp.toFixed(1)} MW` : "-"}
               />
               <MonoStat
                 label="Peak FRP"
-                value={fc.maxFrp != null ? `${fc.maxFrp.toFixed(1)} MW` : "—"}
+                value={fc.maxFrp != null ? `${fc.maxFrp.toFixed(1)} MW` : "-"}
               />
               <MonoStat
                 label="Min FRP"
-                value={fc.minFrp != null ? `${fc.minFrp.toFixed(1)} MW` : "—"}
+                value={fc.minFrp != null ? `${fc.minFrp.toFixed(1)} MW` : "-"}
               />
               <MonoStat
                 label="Latest brightness"
-                value={fc.latestBrightnessK != null ? `${fc.latestBrightnessK.toFixed(0)} K` : "—"}
+                value={fc.latestBrightnessK != null ? `${fc.latestBrightnessK.toFixed(0)} K` : "-"}
               />
               <MonoStat
                 label="Day / night passes"
@@ -309,9 +320,9 @@ export default function FacilityDetailPage() {
               />
             </FieldGroupSection>
 
-            {/* PDF §4: Land cover + Surroundings + Weather — computed LIVE by
+            {/* PDF §4: Land cover + Surroundings + Weather - computed LIVE by
                 the ML service's feature modules (GET /observations via the
-                backend proxy). Unknowns render as "—", never fabricated
+                backend proxy). Unknowns render as "-", never fabricated
                 numbers (info.md rule). */}
             <ObservationsPanels lat={facility.lat} lng={facility.lng} />
 

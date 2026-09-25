@@ -10,6 +10,15 @@ import clsx from "clsx";
  * Updates a filter callback so the map only shows hotspots active at the
  * selected time step. Uses the existing pyro-range CSS styling.
  *
+ * The bar carries the live detection count for the CURRENT step (the same
+ * number the map's bubbles/cluster bubbles sum to), so the timeline itself —
+ * not a separate floating chip — is the single source of "how many detections
+ * right now". This removes the old bottom-left FIRMS chip that overlapped
+ * the timeline and could disagree with it.
+ *
+ * A per-date histogram (bar heights = detections that date) sits behind the
+ * range so the operator can see WHERE activity concentrated before scrubbing.
+ *
  * Render-safety rule: state updaters here are PURE — the parent's
  * `onFilterDate` is never called inside a setState updater (React treats
  * updater bodies as render-phase code, so a parent setState from there
@@ -20,23 +29,32 @@ import clsx from "clsx";
 export default function TimelineSlider({
   hotspots,
   onFilterDate,
+  count = 0,
   className,
 }: {
   hotspots: FirmsHotspot[];
   /** Called with the selected date string (YYYY-MM-DD) or null for "all". */
   onFilterDate: (date: string | null) => void;
+  /** Detections currently on the map for the selected step (already filtered). */
+  count?: number;
   className?: string;
 }) {
   const [playing, setPlaying] = useState(false);
   const [index, setIndex] = useState<number | null>(null);
 
-  /** Sorted unique acquisition dates from the hotspot data. */
-  const dates = useMemo(() => {
-    const set = new Set<string>();
+  /** Sorted unique acquisition dates + per-date detection counts. */
+  const { dates, counts, peak } = useMemo(() => {
+    const dateSet = new Set<string>();
+    const perDate = new Map<string, number>();
     for (const h of hotspots) {
-      if (h.acqDate) set.add(h.acqDate);
+      if (!h.acqDate) continue;
+      dateSet.add(h.acqDate);
+      perDate.set(h.acqDate, (perDate.get(h.acqDate) ?? 0) + 1);
     }
-    return [...set].sort();
+    const d = [...dateSet].sort();
+    let max = 1;
+    for (const v of perDate.values()) if (v > max) max = v;
+    return { dates: d, counts: perDate, peak: max };
   }, [hotspots]);
 
   const currentDate = index != null ? dates[index] ?? null : null;
@@ -92,60 +110,85 @@ export default function TimelineSlider({
   return (
     <div
       className={clsx(
-        "flex items-center gap-3 rounded-xl px-4 py-2.5",
+        "rounded-xl px-4 py-2.5",
         className,
       )}
     >
-      <Calendar size={13} className="flex-shrink-0 text-text-tertiary" />
+      <div className="flex items-center gap-3">
+        <Calendar size={13} className="flex-shrink-0 text-text-tertiary" />
 
-      {/* transport controls */}
-      <button
-        type="button"
-        aria-label="Skip to start"
-        onClick={() => stepTo(0)}
-        className="flex h-6 w-6 items-center justify-center rounded text-text-tertiary transition-colors hover:text-text-primary"
-      >
-        <SkipBack size={12} />
-      </button>
-      <button
-        type="button"
-        aria-label={playing ? "Pause" : "Play"}
-        onClick={() => {
-          if (!playing && index === null) setIndex(0);
-          setPlaying((p) => !p);
-        }}
-        className="flex h-6 w-6 items-center justify-center rounded text-accent-primary transition-colors hover:text-accent-secondary"
-      >
-        {playing ? <Pause size={12} /> : <Play size={12} />}
-      </button>
-      <button
-        type="button"
-        aria-label="Skip to end"
-        onClick={() => stepTo(null)}
-        className="flex h-6 w-6 items-center justify-center rounded text-text-tertiary transition-colors hover:text-text-primary"
-      >
-        <SkipForward size={12} />
-      </button>
+        {/* transport controls */}
+        <button
+          type="button"
+          aria-label="Skip to start"
+          onClick={() => stepTo(0)}
+          className="flex h-6 w-6 items-center justify-center rounded text-text-tertiary transition-colors hover:text-text-primary"
+        >
+          <SkipBack size={12} />
+        </button>
+        <button
+          type="button"
+          aria-label={playing ? "Pause" : "Play"}
+          onClick={() => {
+            if (!playing && index === null) setIndex(0);
+            setPlaying((p) => !p);
+          }}
+          className="flex h-6 w-6 items-center justify-center rounded text-accent-primary transition-colors hover:text-accent-secondary"
+        >
+          {playing ? <Pause size={12} /> : <Play size={12} />}
+        </button>
+        <button
+          type="button"
+          aria-label="Skip to end"
+          onClick={() => stepTo(null)}
+          className="flex h-6 w-6 items-center justify-center rounded text-text-tertiary transition-colors hover:text-text-primary"
+        >
+          <SkipForward size={12} />
+        </button>
 
-      {/* range slider */}
-      <input
-        type="range"
-        min={0}
-        max={dates.length}
-        step={1}
-        value={index ?? dates.length}
-        onChange={handleSliderChange}
-        className="pyro-range h-1 flex-1"
-        style={{
-          background: `linear-gradient(to right, #5B9BD5 ${((index ?? dates.length) / dates.length) * 100}%, #1A2028 0%)`,
-        }}
-        aria-label="Timeline date"
-      />
+        {/* slider + histogram — the histogram bars sit behind the track and
+            are purely indicative (height = share of that date's detections) */}
+        <div className="relative flex-1">
+          <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-[5px] flex h-6 items-end justify-between opacity-70">
+            {dates.map((d) => (
+              <span
+                key={d}
+                className="w-[3px] rounded-sm"
+                style={{
+                  height: `${Math.max(8, ((counts.get(d) ?? 0) / peak) * 100)}%`,
+                  background:
+                    currentDate && d === currentDate ? "#5B9BD5" : "rgba(91,155,213,0.28)",
+                }}
+              />
+            ))}
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={dates.length}
+            step={1}
+            value={index ?? dates.length}
+            onChange={handleSliderChange}
+            className="pyro-range relative h-1 w-full"
+            style={{
+              background: `linear-gradient(to right, #5B9BD5 ${((index ?? dates.length) / dates.length) * 100}%, #1A2028 0%)`,
+            }}
+            aria-label="Timeline date"
+          />
+        </div>
 
-      {/* current date label */}
-      <span className="min-w-[72px] text-right font-mono text-[11px] text-text-secondary">
-        {currentDate ?? "All dates"}
-      </span>
+        {/* live count + date — the map and this bar always agree because the
+            parent passes the same filtered array it renders */}
+        <div className="min-w-[104px] text-right">
+          <div className="font-mono text-[13px] font-semibold leading-tight text-text-primary tabular-nums">
+            {count.toLocaleString("en-US")}
+            <span className="ml-1 text-[9px] font-normal text-text-tertiary">det</span>
+          </div>
+          <div className="font-mono text-[10px] leading-tight text-text-tertiary">
+            {currentDate ?? "All dates (10d)"}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

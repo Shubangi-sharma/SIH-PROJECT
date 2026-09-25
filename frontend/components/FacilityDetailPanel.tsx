@@ -44,7 +44,7 @@ export default function FacilityDetailPanel({
 }) {
   return (
     <div className="flex h-full flex-col">
-      {/* header — status colour carries the identity, no competing card chrome */}
+      {/* header - status colour carries the identity, no competing card chrome */}
       <div className="relative flex items-start gap-3 overflow-hidden border-b border-border-hairline p-5 pb-4">
         <div
           aria-hidden
@@ -109,12 +109,12 @@ export default function FacilityDetailPanel({
 
           {analysis.detectionCount === 0 && (
             <p className="rounded-lg border border-border-hairline bg-bg-raised px-3 py-2 text-xs text-text-secondary">
-              No thermal activity detected — this facility sits in a quiet
+              No thermal activity detected - this facility sits in a quiet
               region of the current FIRMS window.
             </p>
           )}
 
-          {/* actions — full page first, it's the primary destination */}
+          {/* actions - full page first, it's the primary destination */}
           <div className="grid grid-cols-1 gap-2">
             <button
               type="button"

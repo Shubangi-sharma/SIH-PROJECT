@@ -1,133 +1,51 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { Factory, MapPin, Sparkle, X } from "lucide-react";
-import FreshnessBadge from "./FreshnessBadge";
+import React, { useEffect, useMemo, useState } from "react";
+import { Factory, MapPin, X } from "lucide-react";
 import {
   fetchCellDetailByPoint,
   HORIZON_LABELS,
   HOTSPOT_CLASS_LABELS,
   RISK_LEVEL_COLORS,
-  RISK_LEVEL_LABELS,
   type CellDetailResponse,
-  type HotspotClusterDto,
   type RiskHorizon,
 } from "@/lib/riskApi";
+import { FacilityAnalysis, STATUS_META, statusColorHex } from "@/lib/types";
+import { haversineKm } from "@/lib/geo";
 
 /**
  * AreaPanel — what a click on open map shows.
  *
- * The old panel led with a raw H3 cell id ("841f52dfffffffff"), which means
- * nothing to a map reader. Operators still need the cell's stored risk
- * signals, so those stay — but the panel now speaks in plain terms first:
- * whether any monitored facility covers this point, what the area's fire
- * history looks like, and only then the technical detail.
+ * Compact map popup (not a full-height side panel): leads with the monitored
+ * facilities within a 50 km radius of the clicked point — each row zooms the
+ * map to that facility and opens its analysis. Below that, the area's stored
+ * risk signals and recorded fire clusters in condensed form.
  */
 
+const NEARBY_RADIUS_KM = 50;
+const MAX_FACILITY_ROWS = 5;
+const MAX_CLUSTER_ROWS = 3;
 const HORIZON_ORDER: RiskHorizon[] = ["1day", "3day", "7day"];
-
-function RetryButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="mt-2.5 inline-flex items-center gap-1.5 rounded-md border border-border-hairline bg-bg-raised px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-wider text-text-secondary transition-colors duration-150 hover:border-border-strong hover:text-text-primary"
-    >
-      Retry
-    </button>
-  );
-}
-
-function RiskCard({
-  horizon,
-  entry,
-}: {
-  horizon: RiskHorizon;
-  entry?: { probability: number; level: "HIGH" | "LOW"; threshold: number };
-}) {
-  if (!entry) {
-    return (
-      <div className="rounded-lg border border-border-hairline bg-bg-inset px-3 py-2.5">
-        <div className="font-mono text-[10px] uppercase tracking-wider text-text-tertiary">
-          {HORIZON_LABELS[horizon]}
-        </div>
-        <div className="mt-1 text-xs text-text-tertiary">no signal</div>
-      </div>
-    );
-  }
-  const levelColor = entry.level === "HIGH" ? RISK_LEVEL_COLORS.HIGH : RISK_LEVEL_COLORS.LOW;
-  return (
-    <div className="rounded-lg border border-border-hairline bg-bg-inset px-3 py-2.5">
-      <div className="font-mono text-[10px] uppercase tracking-wider text-text-tertiary">
-        {HORIZON_LABELS[horizon]}
-      </div>
-      <div className="mt-1 flex items-baseline gap-1.5">
-        <span className="font-mono text-sm text-text-primary">{entry.probability.toFixed(2)}</span>
-        <span
-          className="rounded-full px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-wider"
-          style={{ color: levelColor, backgroundColor: `${levelColor}22` }}
-        >
-          {entry.level}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function ClusterRow({ cluster }: { cluster: HotspotClusterDto }) {
-  const classLabel = cluster.needs_review
-    ? "Needs Review"
-    : cluster.class
-      ? (HOTSPOT_CLASS_LABELS[cluster.class] ?? cluster.class)
-      : "Unclassified";
-  return (
-    <li className="rounded-lg border border-border-hairline bg-bg-inset px-3 py-2.5">
-      <div className="flex items-center gap-2">
-        <span className="truncate text-sm font-medium text-text-primary">{classLabel}</span>
-        {cluster.is_persistent && (
-          <span className="flex-shrink-0 rounded-full bg-bg-raised px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-text-secondary">
-            persistent
-          </span>
-        )}
-        {cluster.needs_review && (
-          <span
-            className="ml-auto flex-shrink-0 font-mono text-[9px] uppercase tracking-wider text-status-watch"
-            title="Classification confidence below threshold — treat as Needs Review"
-          >
-            review
-          </span>
-        )}
-      </div>
-      <div className="mt-1 flex items-center gap-3 font-mono text-[10px] text-text-secondary">
-        <span>{cluster.unique_fire_days} fire days</span>
-        <span>{cluster.total_detections} det</span>
-        <span className="ml-auto">
-          {cluster.first_seen} → {cluster.last_seen}
-        </span>
-      </div>
-      {cluster.confidence != null && !cluster.needs_review && (
-        <div className="mt-0.5 font-mono text-[10px] text-text-tertiary">
-          confidence {cluster.confidence.toFixed(2)}
-        </div>
-      )}
-    </li>
-  );
-}
 
 export default function AreaPanel({
   lat,
   lng,
+  facilities = [],
+  onSelectFacility,
   onClose,
 }: {
   lat: number;
   lng: number;
+  /** All known facility analyses — narrowed to the 50 km radius here. */
+  facilities?: FacilityAnalysis[];
+  /** Clicking a nearby facility row: zoom + open its analysis drawer. */
+  onSelectFacility?: (id: string) => void;
   onClose: () => void;
 }) {
   const [data, setData] = useState<CellDetailResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
-  const retry = () => setRefreshKey((k) => k + 1);
 
   useEffect(() => {
     setData(null);
@@ -149,24 +67,36 @@ export default function AreaPanel({
     };
   }, [lat, lng, refreshKey]);
 
+  /** Facilities within 50 km, nearest first. */
+  const nearby = useMemo(() => {
+    return facilities
+      .map((a) => ({
+        analysis: a,
+        distKm: haversineKm(lat, lng, a.facility.lat, a.facility.lng),
+      }))
+      .filter((x) => x.distKm <= NEARBY_RADIUS_KM)
+      .sort((x, y) => x.distKm - y.distKm);
+  }, [facilities, lat, lng]);
+
   const risk = data?.risk;
   const riskOk = risk && risk.status === "ok" ? risk : null;
   const insufficient = risk && risk.status === "insufficient_history";
-  const hasClusters = (data?.hotspots.length ?? 0) > 0;
-  const hasSignals = Boolean(riskOk);
+  const clusters = data?.hotspots ?? [];
+  const hasNearby = nearby.length > 0;
 
   return (
     <aside
       aria-label="Area detail"
-      className="flex h-full w-full flex-col overflow-hidden"
+      className="flex max-h-[min(72vh,560px)] w-full flex-col overflow-hidden"
     >
-      {/* header — plain-language area summary */}
-      <div className="flex items-start gap-3 border-b border-border-hairline p-5 pb-4">
+      {/* header */}
+      <div className="flex items-start gap-2.5 border-b border-border-hairline px-4 py-3">
         <div className="min-w-0">
-          <h2 className="font-display text-lg font-semibold leading-snug text-text-primary">
-            {hasClusters ? "Fire activity in this area" : "No monitored facilities here"}
+          <h2 className="font-display text-[15px] font-semibold leading-snug text-text-primary">
+            {hasNearby ? "Facilities within 50 km" : "No monitored facilities within 50 km"}
           </h2>
-          <p className="mt-0.5 font-mono text-[11px] text-text-tertiary">
+          <p className="mt-0.5 flex items-center gap-1 font-mono text-[10px] text-text-tertiary">
+            <MapPin size={9} aria-hidden />
             {lat.toFixed(3)}°, {lng.toFixed(3)}°
           </p>
         </div>
@@ -174,140 +104,181 @@ export default function AreaPanel({
           type="button"
           onClick={onClose}
           aria-label="Close area detail"
-          className="ml-auto flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-text-tertiary transition-colors duration-150 hover:bg-bg-raised hover:text-text-primary"
+          className="ml-auto flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg text-text-tertiary transition-colors duration-150 hover:bg-bg-raised hover:text-text-primary"
         >
-          <X size={16} />
+          <X size={14} />
         </button>
       </div>
 
-      <div className="pyro-scroll min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
-        {/* plain-language state line */}
-        <p className="text-sm leading-relaxed text-text-secondary">
-          {hasClusters ? (
-            <>
-              Thermal activity has been recorded around this point. Details below —
-              open a facility marker or hotspot dot for the full picture.
-            </>
-          ) : (
-            <>
-              This point sits outside every facility&apos;s{" "}
-              <span className="text-text-primary">5 km monitoring radius</span> — no
-              industrial fire signatures recorded here in the current window. Most
-              likely open terrain, or a source we don&apos;t track.
-            </>
-          )}
-        </p>
-
-        {loading && (
-          <div className="space-y-3" aria-hidden>
-            <div className="h-20 animate-pulse rounded-xl bg-bg-surface" />
-            <div className="h-32 animate-pulse rounded-xl bg-bg-surface" />
-          </div>
-        )}
-
-        {error && (
-          <div className="rounded-lg border border-border-strong bg-bg-void/90 px-3 py-2.5 text-xs text-status-watch">
-            <p className="flex items-start gap-2">
-              <Sparkle size={14} className="mt-0.5 flex-shrink-0" />
-              Risk signals couldn&apos;t be loaded for this area.
-            </p>
-            <RetryButton onClick={retry} />
-          </div>
-        )}
-
-        {data && (
-          <>
-            <FreshnessBadge meta={data.meta} label="Data as of" className="w-fit" />
-            {data.meta.stale && (
-              <p className="text-[10px] leading-snug text-status-watch">
-                Last known good data — the ML service was unreachable when this
-                was fetched.
-              </p>
-            )}
-
-            {/* risk signals */}
-            {riskOk && (
-              <section className="rounded-xl bg-bg-surface p-4">
-                <div className="flex items-center gap-2">
-                  <h3 className="font-display text-sm font-semibold text-text-primary">
-                    Fire-weather risk outlook
-                  </h3>
-                  <span
-                    className="ml-auto rounded-full px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider"
-                    style={{
-                      color: RISK_LEVEL_COLORS[riskOk.overall] ?? RISK_LEVEL_COLORS.LOW,
-                      backgroundColor: `${RISK_LEVEL_COLORS[riskOk.overall] ?? RISK_LEVEL_COLORS.LOW}22`,
-                    }}
+      <div className="pyro-scroll min-h-0 flex-1 space-y-3.5 overflow-y-auto px-4 py-3.5">
+        {/* nearby facilities — the primary action surface */}
+        {loading ? (
+          <p className="font-mono text-[11px] text-text-tertiary">Checking monitored facilities…</p>
+        ) : hasNearby ? (
+          <ul className="space-y-1.5">
+            {nearby.slice(0, MAX_FACILITY_ROWS).map(({ analysis, distKm }) => {
+              const hex = statusColorHex(analysis.status);
+              return (
+                <li key={analysis.facility.id}>
+                  <button
+                    type="button"
+                    onClick={() => onSelectFacility?.(analysis.facility.id)}
+                    className="group flex w-full items-center gap-2.5 rounded-lg border border-border-hairline bg-bg-inset px-2.5 py-2 text-left transition-colors duration-150 hover:border-accent-primary/40"
                   >
-                    {RISK_LEVEL_LABELS[riskOk.overall] ?? riskOk.overall}
-                  </span>
-                </div>
-                <div className="mt-3 grid grid-cols-1 gap-2">
-                  {HORIZON_ORDER.map((h) => (
-                    <RiskCard key={h} horizon={h} entry={riskOk.horizons[h]} />
-                  ))}
-                </div>
-                <p className="mt-2.5 text-[10px] leading-snug text-text-tertiary">
-                  Threshold signals from the GRU models — not probabilities.
-                </p>
-              </section>
+                    <span
+                      aria-hidden
+                      className="h-2 w-2 flex-shrink-0 rounded-full"
+                      style={{ backgroundColor: hex }}
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[12.5px] font-medium text-text-primary group-hover:text-accent-primary">
+                        {analysis.facility.name}
+                      </span>
+                      <span className="block truncate font-mono text-[10px] text-text-tertiary">
+                        {analysis.facility.type} · {STATUS_META[analysis.status].label}
+                      </span>
+                    </span>
+                    <span className="flex-shrink-0 font-mono text-[10px] tabular-nums text-text-secondary">
+                      {distKm.toFixed(1)} km
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+            {nearby.length > MAX_FACILITY_ROWS && (
+              <li className="px-1 font-mono text-[10px] text-text-tertiary">
+                +{nearby.length - MAX_FACILITY_ROWS} more within 50 km
+              </li>
             )}
-
-            {insufficient && (
-              <p className="rounded-lg border border-border-hairline bg-bg-raised px-3 py-2.5 text-xs leading-snug text-text-secondary">
-                Not enough observation history for this area yet — the outlook
-                needs 30 consecutive days of fire + weather data. Signals appear
-                once the pipeline accumulates enough history.
-              </p>
-            )}
-
-            {risk && risk.status === "unavailable" && (
-              <div className="rounded-lg border border-border-strong bg-bg-void/90 px-3 py-3 text-xs">
-                <p className="font-medium text-status-watch">Outlook unavailable</p>
-                <p className="mt-1.5 leading-snug text-text-secondary">
-                  The forecast models could not be reached.{" "}
-                  {risk.note ?? "No stored prediction exists for this area yet."}
-                </p>
-                <RetryButton onClick={retry} />
-              </div>
-            )}
-
-            {/* activity clusters — plain framing */}
-            <section>
-              <h3 className="font-display text-sm font-semibold text-text-primary">
-                {hasClusters ? "Recorded activity" : "Recorded activity — none"}
-              </h3>
-              {data.hotspots.length === 0 ? (
-                <p className="mt-2 rounded-lg border border-border-hairline bg-bg-raised px-3 py-2.5 text-xs leading-snug text-text-secondary">
-                  No persistent fire clusters recorded for this area in the
-                  current pipeline window.
-                </p>
-              ) : (
-                <ul className="mt-3 space-y-2">
-                  {data.hotspots.map((c) => (
-                    <ClusterRow key={c.cluster_id} cluster={c} />
-                  ))}
-                </ul>
-              )}
-            </section>
-
-            {!hasSignals && !hasClusters && !error && (
-              <div className="flex items-center gap-2.5 rounded-lg border border-border-hairline bg-bg-raised px-3 py-2.5">
-                <Factory size={14} className="flex-shrink-0 text-text-tertiary" />
-                <p className="text-[11px] leading-snug text-text-tertiary">
-                  Want this area monitored? Facilities are ingested from
-                  OpenStreetMap — add industrial sites there and they appear on
-                  the next ingest cycle.
-                </p>
-              </div>
-            )}
-
-            <p className="flex items-center gap-1.5 text-[10px] text-text-tertiary">
-              <MapPin size={10} aria-hidden />
-              Area reference {data.h3_cell}
-            </p>
-          </>
+          </ul>
+        ) : (
+          <p className="text-[11.5px] leading-relaxed text-text-secondary">
+            This point sits outside every facility&apos;s{" "}
+            <span className="text-text-primary">5 km monitoring radius</span>. Most likely open
+            terrain, or a source we don&apos;t track.
+          </p>
         )}
+
+        {/* risk outlook — condensed chips */}
+        {riskOk && (
+          <section>
+            <h3 className="mb-1.5 font-body text-[10px] font-semibold uppercase tracking-widest text-text-tertiary">
+              Fire-weather risk outlook
+            </h3>
+            <div className="grid grid-cols-3 gap-1.5">
+              {HORIZON_ORDER.map((h) => {
+                const entry = riskOk.horizons[h];
+                const color = entry
+                  ? entry.level === "HIGH"
+                    ? RISK_LEVEL_COLORS.HIGH
+                    : RISK_LEVEL_COLORS.LOW
+                  : undefined;
+                return (
+                  <div
+                    key={h}
+                    className="rounded-lg border border-border-hairline bg-bg-inset px-2 py-1.5 text-center"
+                  >
+                    <div className="font-mono text-[9px] uppercase tracking-wider text-text-tertiary">
+                      {HORIZON_LABELS[h].split(" ")[0]}
+                    </div>
+                    {entry ? (
+                      <>
+                        <div className="font-mono text-[13px] text-text-primary">
+                          {entry.probability.toFixed(2)}
+                        </div>
+                        <div
+                          className="font-mono text-[8.5px] font-semibold uppercase"
+                          style={{ color }}
+                        >
+                          {entry.level}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="mt-1 font-mono text-[10px] text-text-tertiary">n/a</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <p className="mt-1.5 text-[9.5px] leading-snug text-text-tertiary">
+              Threshold signals, not probabilities.
+            </p>
+          </section>
+        )}
+        {insufficient && (
+          <p className="rounded-lg border border-border-hairline bg-bg-raised px-2.5 py-2 text-[10.5px] leading-snug text-text-secondary">
+            Not enough history for a risk outlook here yet (needs 30 days of data).
+          </p>
+        )}
+        {risk && risk.status === "unavailable" && (
+          <div className="rounded-lg border border-border-strong bg-bg-void/90 px-2.5 py-2 text-[10.5px] text-status-watch">
+            Outlook unavailable — ML service unreachable.{" "}
+            <button
+              type="button"
+              onClick={() => setRefreshKey((k) => k + 1)}
+              className="underline underline-offset-2 hover:text-text-primary"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+        {error && (
+          <div className="rounded-lg border border-border-strong bg-bg-void/90 px-2.5 py-2 text-[10.5px] text-status-watch">
+            Risk signals couldn&apos;t load.{" "}
+            <button
+              type="button"
+              onClick={() => setRefreshKey((k) => k + 1)}
+              className="underline underline-offset-2 hover:text-text-primary"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        {/* recorded fire clusters — condensed */}
+        {clusters.length > 0 && (
+          <section>
+            <h3 className="mb-1.5 font-body text-[10px] font-semibold uppercase tracking-widest text-text-tertiary">
+              Recorded activity
+            </h3>
+            <ul className="space-y-1">
+              {clusters.slice(0, MAX_CLUSTER_ROWS).map((c) => (
+                <li
+                  key={c.cluster_id}
+                  className="flex items-center gap-2 rounded-lg bg-bg-inset px-2.5 py-1.5 font-mono text-[10px] text-text-secondary"
+                >
+                  <span className="truncate text-text-primary">
+                    {c.needs_review
+                      ? "Needs Review"
+                      : c.class
+                        ? HOTSPOT_CLASS_LABELS[c.class] ?? c.class
+                        : "Unclassified"}
+                  </span>
+                  <span className="ml-auto flex-shrink-0 tabular-nums">
+                    {c.total_detections} det · {c.last_seen}
+                  </span>
+                </li>
+              ))}
+              {clusters.length > MAX_CLUSTER_ROWS && (
+                <li className="px-1 font-mono text-[10px] text-text-tertiary">
+                  +{clusters.length - MAX_CLUSTER_ROWS} more clusters
+                </li>
+              )}
+            </ul>
+          </section>
+        )}
+
+        {!hasNearby && clusters.length === 0 && !loading && (
+          <div className="flex items-start gap-2 rounded-lg border border-border-hairline bg-bg-raised px-2.5 py-2">
+            <Factory size={12} className="mt-0.5 flex-shrink-0 text-text-tertiary" />
+            <p className="text-[10px] leading-snug text-text-tertiary">
+              Facilities come from OpenStreetMap — add industrial sites there and they appear on
+              the next ingest cycle.
+            </p>
+          </div>
+        )}
+
+        <p className="font-mono text-[9px] text-text-tertiary/70">Area ref {data?.h3_cell}</p>
       </div>
     </aside>
   );

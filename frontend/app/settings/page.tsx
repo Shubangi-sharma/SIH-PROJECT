@@ -17,7 +17,7 @@ import {
 
 const STATUS_HELP: Record<string, string> = {
   normal: "No thermal detections within the 5 km corroboration radius.",
-  watch: "Detections present but steady — FRP in line with the site's own history.",
+  watch: "Detections present but steady - FRP in line with the site's own history.",
   suspicious: "New activity in the last 5 days, or FRP ≥ ~1.3× the site's baseline.",
   critical: "FRP far above the site's recency-weighted baseline (≥ 2×). Act now.",
   unknown: "Detections nearby, but sensor confidence too low to classify.",
@@ -173,7 +173,7 @@ function SystemStatusSection() {
 
       {loadError && !backend && !ml ? (
         <div className="dash-card rounded-xl p-4 text-xs text-status-watch">
-          Backend unreachable — is the Node backend running (default http://localhost:4000)?
+          Backend unreachable - is the Node backend running (default http://localhost:4000)?
         </div>
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
@@ -185,7 +185,7 @@ function SystemStatusSection() {
             {backend ? (
               <div className="divide-y divide-border-hairline">
                 <KV label="Detections stored" value={backend.db.rows.toLocaleString("en-IN")} />
-                <KV label="Archive window" value={`${backend.db.minDate ?? "—"} → ${backend.db.maxDate ?? "—"}`} />
+                <KV label="Archive window" value={`${backend.db.minDate ?? "-"} → ${backend.db.maxDate ?? "-"}`} />
                 <KV label="Last FIRMS refresh" value={timeLabel(backend.lastRefresh)} />
                 <KV label="Last facility ingest" value={timeLabel(backend.lastFacilityIngest)} />
               </div>
@@ -319,7 +319,7 @@ export default function SettingsPage() {
             <h3 className="mb-1 text-sm font-medium text-text-primary">Risk Statuses</h3>
             <p className="mb-3 text-xs text-text-secondary">
               Each facility is classified by comparing recent thermal detections
-              against its own baseline — never against other sites.
+              against its own baseline - never against other sites.
             </p>
             <div className="space-y-2">
               {STATUS_ORDER.map((s) => (
@@ -339,7 +339,7 @@ export default function SettingsPage() {
           <div className="dash-card rounded-xl p-5">
             <h3 className="mb-1 text-sm font-medium text-text-primary">FRP Bands</h3>
             <p className="mb-3 text-xs text-text-secondary">
-              Fire Radiative Power in megawatts — the radiant heat output.
+              Fire Radiative Power in megawatts - the radiant heat output.
             </p>
             <div className="space-y-2">
               {FRP_BANDS.map((band) => (

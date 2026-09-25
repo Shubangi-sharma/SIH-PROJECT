@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import React, { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import MapCanvas, {
   DEFAULT_FILTERS,
   frpBandIndex,
@@ -9,6 +9,9 @@ import MapCanvas, {
   MapFilters,
   MapMode,
 } from "@/components/MapCanvas";
+// NOTE: this file must end with a default-exported <Suspense> wrapper around
+// MapPageContent — useSearchParams is not allowed to prerender without one
+// (a missing wrapper 500s /map with "Cannot access default.then on the server").
 import DetailDrawer, { type DetailDrawerSelection } from "@/components/DetailDrawer";
 import AreaPanel from "@/components/AreaPanel";
 import TimelineSlider from "@/components/TimelineSlider";
@@ -21,7 +24,6 @@ import { BBox, REGION_BBOXES, stateForPoint } from "@/lib/regions";
 import type { FacilityNarrative } from "@/lib/types";
 import type { FirmsHotspot } from "@/lib/firms";
 import { haversineKm } from "@/lib/geo";
-import clsx from "clsx";
 
 /** True when `inner` lies fully inside `outer` (with a small margin). */
 function bboxContained(inner: BBox, outer: BBox): boolean {
@@ -37,8 +39,9 @@ function bboxContained(inner: BBox, outer: BBox): boolean {
 /** §5: map-driven refetches wait ≥500 ms after the map stops moving. */
 const VIEWPORT_DEBOUNCE_MS = 500;
 
-export default function MapPage() {
+function MapPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [mode, setMode] = useState<MapMode>("india");
   const [basemap, setBasemap] = useState<Basemap>("dark");
@@ -49,9 +52,27 @@ export default function MapPage() {
   });
   const [layers, setLayers] = useState<Record<LayerId, boolean>>({
     firms: true,
+    facilities: true,
   });
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  /* -------- deep link: /map?lat=…&lng=…&zoom=… flies straight to a point.
+     Used by facility locators ("Open on Hotspot Map") so the operator
+     lands on the exact location, one click. Runs once on mount. */
+  useEffect(() => {
+    const lat = Number(searchParams.get("lat"));
+    const lng = Number(searchParams.get("lng"));
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) return;
+    const zoom = Number(searchParams.get("zoom"));
+    setView({
+      center: [lat, lng],
+      zoom: Number.isFinite(zoom) && zoom >= 3 && zoom <= 18 ? zoom : 12,
+      key: `deeplink-${lat}-${lng}-${Date.now()}`,
+    });
+    // Consume the params so refresh/re-navigation doesn't re-fly mid-session.
+    router.replace("/map", { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   /* -------- §3 filters: state, risk status, FRP band -------- */
   const [filters, setFilters] = useState<MapFilters>(DEFAULT_FILTERS);
 
@@ -163,6 +184,17 @@ export default function MapPage() {
     const matches = hotspots.filter((h) => h.latitude === lat && h.longitude === lng);
     return matches[idx] ?? matches[0] ?? null;
   }, [selectedHotspotKey, hotspots]);
+
+  /* -------- focus mode: a pinned hotspot is shown ALONE on the map.
+     Everything else (other dots, facility markers) hides so the studied
+     detection can be read without visual clutter; deselect restores. */
+  const isolatedHotspots = useMemo(() => {
+    if (!selectedHotspot) return filteredHotspots;
+    return filteredHotspots.filter(
+      (h) => h.latitude === selectedHotspot.latitude && h.longitude === selectedHotspot.longitude,
+    );
+  }, [filteredHotspots, selectedHotspot]);
+  const mapAnalyses = selectedHotspot ? [] : filteredAnalyses;
 
   /** Facilities whose corroboration radius could cover the pinned hotspot. */
   const relatedFacilities = useMemo(() => {
@@ -303,7 +335,7 @@ export default function MapPage() {
         <div className="relative min-h-0 flex-1">
           <MapCanvas
             view={view}
-            analyses={filteredAnalyses}
+            analyses={mapAnalyses}
             selectedId={selectedId}
             onSelect={handleSelect}
             mode={mode}
@@ -313,7 +345,7 @@ export default function MapPage() {
             tilesLoading={firmsLoading && !analyses.length}
             basemap={basemap}
             onBasemapChange={handleBasemapChange}
-            firmsHotspots={filteredHotspots}
+            firmsHotspots={isolatedHotspots}
             selectedHotspotKey={selectedHotspotKey}
             onSelectHotspot={handleSelectHotspot}
             onViewport={handleViewport}
@@ -321,36 +353,36 @@ export default function MapPage() {
             filters={filters}
             onFiltersChange={setFilters}
           >
-            {/* FIRMS feed status — always honest: live count or explicit error.
-                Sits one row above the timeline so the two never collide. */}
-            <div
-              role="status"
-              className="map-glass absolute bottom-[64px] left-4 z-[1000] flex max-w-[420px] items-center gap-2 rounded-lg px-3 py-2 font-mono text-[11px] text-text-secondary"
-            >
-              <span
-                className={clsx(
-                  "inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full",
-                  firmsError ? "bg-status-watch" : "animate-pulse bg-accent-secondary",
-                )}
-              />
-              {firmsError
-                ? "FIRMS feed unavailable"
-                : replay.currentDate
-                  ? `VIIRS · replay ${replay.label} · ${replay.currentDate}`
-                  : `VIIRS · ${filteredHotspots.length} detections${filterDate ? ` (${filterDate})` : " (10d)"}${filters.frpBand != null ? " · FRP filtered" : ""}`}
-            </div>
+            {/* FIRMS feed error — the only floating status chip left. The live
+                detection count moved INTO the timeline/replay bar, so the two
+                can never overlap or disagree with the bubbles on the map. */}
+            {firmsError && (
+              <div
+                role="status"
+                className="map-glass absolute left-4 top-14 z-[1000] rounded-lg px-3 py-2 font-mono text-[11px] text-status-watch"
+              >
+                FIRMS feed unavailable
+              </div>
+            )}
 
-            {/* timeline scrubber (hide while replay owns the date filter) */}
+            {/* timeline scrubber + live count (hidden while replay owns the
+                date filter) — the count tracks the current scrub step */}
             {!replay.currentDate && (
               <TimelineSlider
                 hotspots={hotspots}
                 onFilterDate={setFilterDate}
-                className="map-glass absolute bottom-4 left-1/2 z-[1000] w-[min(480px,calc(100%-32px))] -translate-x-1/2"
+                count={filteredHotspots.length}
+                className="map-glass absolute bottom-4 left-1/2 z-[1000] w-[min(560px,calc(100%-32px))] -translate-x-1/2"
               />
             )}
 
-            {/* replay transport — appears only when a facility is selected (B1) */}
-            <ReplayControls replay={replay} className="absolute bottom-4 left-1/2 z-[1000] -translate-x-1/2" />
+            {/* replay transport - appears only when a facility is selected (B1);
+                also carries the live count for the current replay step */}
+            <ReplayControls
+              replay={replay}
+              count={filteredHotspots.length}
+              className="absolute bottom-4 left-1/2 z-[1000] -translate-x-1/2"
+              />
 
             {/* backend status chips */}
             {analysesError && (
@@ -364,7 +396,7 @@ export default function MapPage() {
           </MapCanvas>
         </div>
 
-        {/* persistent detail pane — renders exactly one state */}
+        {/* persistent detail pane - renders exactly one state */}
         <DetailDrawer
           collapsed={drawerCollapsed}
           onToggleCollapsed={() => setDrawerCollapsed((c) => !c)}
@@ -374,18 +406,44 @@ export default function MapPage() {
           viewportBbox={debouncedViewport}
         />
 
-        {/* area panel — shown when a point outside every facility radius is
-            clicked; replaces the old raw H3 cell panel. */}
+        {/* area popup — compact card (NOT a full-height panel) listing the
+            monitored facilities within 50 km of the clicked point; tapping one
+            zooms the map there and opens its analysis drawer. */}
         {selectedArea && (
-          <div className="map-glass absolute bottom-4 left-4 top-4 z-[1200] w-[340px] max-w-[calc(100%-32px)] overflow-hidden rounded-xl">
+          <div className="map-glass absolute bottom-16 left-4 z-[1200] w-[320px] max-w-[calc(100%-32px)] overflow-hidden rounded-xl">
             <AreaPanel
               lat={selectedArea.lat}
               lng={selectedArea.lng}
+              facilities={analyses}
+              onSelectFacility={(id) => {
+                const a = analyses.find((x) => x.facility.id === id);
+                setSelectedArea(null);
+                if (!a) return;
+                handleSelect(id);
+                setView({
+                  center: [a.facility.lat, a.facility.lng],
+                  zoom: 11,
+                  key: `area-focus-${id}-${Date.now()}`,
+                });
+              }}
               onClose={() => setSelectedArea(null)}
             />
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+/** useSearchParams requires a Suspense boundary during prerender — without
+    this wrapper the /map route 500s with "Cannot access default.then on the
+    server" (the dynamic-imported MapInner inside is fine once suspended). */
+export default function MapPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex h-full items-center justify-center bg-gradient-mesh" />
+    }>
+      <MapPageContent />
+    </Suspense>
   );
 }

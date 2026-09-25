@@ -23,6 +23,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { FacilityAnalysis, RiskStatus, statusColorHex, STATUS_META } from "@/lib/types";
+import PyroLoader from "@/components/PyroLoader";
 import { useAnalyses, useFirms, useCommand } from "@/lib/hooks";
 import { REGION_BBOXES } from "@/lib/regions";
 import { StatusBadge, StatusGlyph } from "@/lib/status";
@@ -31,7 +32,9 @@ import type { MapView } from "@/components/MapInner";
 const MapInner = dynamic(() => import("@/components/MapInner"), {
   ssr: false,
   loading: () => (
-    <div className="h-full w-full skeleton-shimmer rounded-xl" aria-hidden />
+    <div className="flex h-full w-full items-center justify-center">
+      <PyroLoader label="Rendering live overview" compact />
+    </div>
   ),
 });
 
@@ -75,7 +78,7 @@ function MetricCard({
         <span className="text-xs text-text-secondary">{label}</span>
       </div>
       <div className={`mt-3 font-display text-2xl font-semibold leading-none text-text-primary ${loading ? "animate-pulse" : ""}`}>
-        {loading ? "—" : value}
+        {loading ? "-" : value}
       </div>
     </div>
   );
@@ -288,7 +291,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* ── category mix — single horizontal strip, no wrapping grid ── */}
+        {/* ── category mix - single horizontal strip, no wrapping grid ── */}
         {!loading && categoryCounts.length > 0 && (
           <div className="flex flex-col gap-3">
             <SectionHeader title="Behavioural Categories" />

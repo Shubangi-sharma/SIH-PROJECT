@@ -86,7 +86,7 @@ class PredictRequest(BaseModel):
     region: str | None = None
     features: dict[str, float | str] | None = None
     # Decision (b): "new" (default, MLP) or "old" (legacy GBM) — see
-    # docs/CLASSIFIER_DECISION.md. The response's classifier_model_used field
+    # docs/decisions-and-faq.md. The response's classifier_model_used field
     # always names the model that actually answered.
     model_version: Literal["new", "old"] | None = None
     # Phase 2A: risk is not computable yet (no live H3 sequence pipeline).

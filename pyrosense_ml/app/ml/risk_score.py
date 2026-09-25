@@ -11,7 +11,7 @@ probabilities — always describe them that way in UI/documentation.
 Scaling and feature engineering are NOT this module's job (that is Phase 2C):
 callers hand over an already-scaled (30, 17) sequence in RISK_FEATURES order.
 
-Classification is version-routed per docs/CLASSIFIER_DECISION.md decision (b):
+Classification is version-routed per docs/decisions-and-faq.md decision (b):
 - model_version="new" (default) -> MLP stack (scaler inside this module).
 - model_version="old" -> Gradient Boosting pipeline (expects a raw 36-column
   DataFrame; its own preprocessing — imputation + one-hot — lives inside the
@@ -129,7 +129,7 @@ def _classify_old(features: dict) -> dict:
     if models.gbm_pipeline is None:
         raise RuntimeError(
             "model_version='old' requested but the legacy GBM pipeline is not "
-            "loaded (see docs/CLASSIFIER_DECISION.md)"
+            "loaded (see docs/decisions-and-faq.md)"
         )
     frame = pd.DataFrame(
         [[features[name] for name in CLASSIFIER_FEATURES_OLD]],

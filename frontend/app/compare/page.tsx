@@ -157,7 +157,7 @@ export default function ComparePage() {
             Facility Comparison
           </h1>
           <p className="mt-1 max-w-3xl text-sm text-text-secondary">
-            Side-by-side view of pinned facilities — health trend inputs, risk
+            Side-by-side view of pinned facilities - health trend inputs, risk
             status and real FRP behaviour. Pin facilities from the Facility
             Explorer or the map.
           </p>
@@ -192,11 +192,11 @@ export default function ComparePage() {
             </p>
             <p className="max-w-md text-xs leading-relaxed text-text-tertiary">
               Open the Facility Explorer and use the pin button on any facility
-              card — select 2 or 3, then return here for the side-by-side view.
+              card - select 2 or 3, then return here for the side-by-side view.
             </p>
             <Link
               href="/facilities"
-              className="mt-1 rounded-lg border border-border-hairline bg-bg-raised px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors duration-150 hover:border-border-strong hover:text-text-primary"
+              className="mt-1 rounded-lg border border-accent-primary/30 bg-accent-primary/15 px-3 py-1.5 text-xs font-medium text-accent-primary transition-colors duration-150 hover:bg-accent-primary/25"
             >
               <MapPin size={12} className="mr-1.5 inline" />
               Go to Facility Explorer
@@ -214,10 +214,10 @@ export default function ComparePage() {
 
         {resolved.length >= 2 && (
           <>
-            {/* FRP trend — real stored detections, mean FRP per active day */}
+            {/* FRP trend - real stored detections, mean FRP per active day */}
             <section className="dash-card rounded-xl p-5">
               <h3 className="font-display text-sm font-semibold text-text-primary">
-                FRP trend — mean MW per active day (last 10 days)
+                FRP trend - mean MW per active day (last 10 days)
               </h3>
               <p className="mt-0.5 text-[11px] text-text-tertiary">
                 Built from the same stored FIRMS detections the classification
@@ -229,7 +229,7 @@ export default function ComparePage() {
                 ) : chartData.length === 0 ? (
                   <div className="flex h-full items-center justify-center px-6 text-center text-xs text-text-tertiary">
                     No detections near any pinned facility in the current
-                    window — nothing to plot without real data.
+                    window - nothing to plot without real data.
                   </div>
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
@@ -333,19 +333,19 @@ function CompareCard({
           <div className="rounded-lg border border-border-hairline bg-white/[0.02] px-2.5 py-2">
           <div className="text-[9px] uppercase tracking-wider text-text-tertiary">Live mean FRP</div>
           <div className="mt-0.5 font-mono text-text-primary">
-            {a.liveMeanFrp != null ? `${a.liveMeanFrp.toFixed(1)} MW` : "—"}
+            {a.liveMeanFrp != null ? `${a.liveMeanFrp.toFixed(1)} MW` : "-"}
           </div>
         </div>
           <div className="rounded-lg border border-border-hairline bg-white/[0.02] px-2.5 py-2">
           <div className="text-[9px] uppercase tracking-wider text-text-tertiary">Baseline FRP</div>
           <div className="mt-0.5 font-mono text-text-primary">
-            {a.baselineMeanFrp != null ? `${a.baselineMeanFrp.toFixed(1)} MW` : "—"}
+            {a.baselineMeanFrp != null ? `${a.baselineMeanFrp.toFixed(1)} MW` : "-"}
           </div>
         </div>
           <div className="rounded-lg border border-border-hairline bg-white/[0.02] px-2.5 py-2">
           <div className="text-[9px] uppercase tracking-wider text-text-tertiary">Latest FRP</div>
           <div className="mt-0.5 font-mono text-text-primary">
-            {a.latestFrp != null ? `${a.latestFrp.toFixed(1)} MW` : "—"}
+            {a.latestFrp != null ? `${a.latestFrp.toFixed(1)} MW` : "-"}
           </div>
         </div>
       </div>
@@ -369,7 +369,7 @@ function CompareCard({
         )}
       </div>
 
-      {/* what changed — real computed diffs, shared component */}
+      {/* what changed - real computed diffs, shared component */}
       <WhatChangedMini rows={a.whatChangedRows ?? []} />
     </div>
   );

@@ -25,7 +25,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "PYROSENSE — Thermal Anomaly Command",
+  title: "PYROSENSE - Thermal Anomaly Command",
   description:
     "AI-based industrial thermal anomaly monitoring command dashboard.",
 };

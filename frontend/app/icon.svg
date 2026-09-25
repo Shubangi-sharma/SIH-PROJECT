@@ -1,15 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
   <rect width="32" height="32" rx="7" fill="#0A0D10"/>
-  <path d="M3.8 10.2V7A3.2 3.2 0 0 1 7 3.8h3.2" stroke="#5B9BD5" stroke-width="2.2" stroke-linecap="round" fill="none"/>
-  <path d="M21.8 3.8H25A3.2 3.2 0 0 1 28.2 7v3.2" stroke="#5B9BD5" stroke-width="2.2" stroke-linecap="round" fill="none"/>
-  <path d="M28.2 21.8V25a3.2 3.2 0 0 1-3.2 3.2h-3.2" stroke="#5B9BD5" stroke-width="2.2" stroke-linecap="round" fill="none"/>
-  <path d="M10.2 28.2H7A3.2 3.2 0 0 1 3.8 25v-3.2" stroke="#5B9BD5" stroke-width="2.2" stroke-linecap="round" fill="none"/>
-  <path d="M16 6.8c1.1 3.1 4.9 4.6 4.9 9.2 0 4-2.4 7.2-4.9 7.2s-4.9-3.2-4.9-7.2c0-2.4 1.3-4.4 2.5-5.9.5 1 .9 1.7 2 2.4 0-2.4.1-4.1.4-5.7Z" fill="url(#g)"/>
+  <g transform="translate(-5.12, 0.69) scale(1.32)">
+    <path fill-rule="evenodd" clip-rule="evenodd" d="M16 1.5c.35 2.9-.35 5.6-2.1 7.9-.5-1-.85-2.1-1.05-3.3C11.2 8 10 10.7 10 14c0 4.6 2.7 7.7 6 7.7s6-3.1 6-7.7c0-4.8-3.9-7.5-6-12.5Zm0 9.7c1.9 2 2.9 3.9 2.9 5.9 0 2.2-1.3 3.7-2.9 3.7s-2.9-1.5-2.9-3.7c0-2 1-3.9 2.9-5.9Z" fill="url(#g)"/>
+  </g>
   <defs>
-    <linearGradient id="g" x1="16" y1="7" x2="16" y2="23.2" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#F0A35C"/>
+    <linearGradient id="g" x1="16" y1="3.5" x2="16" y2="25.7" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F5B04C"/>
       <stop offset="0.55" stop-color="#E06060"/>
-      <stop offset="1" stop-color="#E06060" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#D14D4D"/>
     </linearGradient>
   </defs>
 </svg>

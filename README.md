@@ -33,8 +33,8 @@
 | Model | Purpose | Input Features | Key Metrics |
 |---|---|---|---|
 | **Gradient Boosting Classifier (old)** | Predicts contextual hotspot categories (4 classes). | 36 features | No verified accuracy or F1 metrics documented in the repository. |
-| **MLP Classifier (new)** | Predicts contextual hotspot categories (5 classes). | 43 features | Training samples: NOT YET PROVIDED, Random-split accuracy: NOT YET PROVIDED. |
-| **1/3/7-Day GRU Risk Models** | Predicts wildfire risk at 1-day, 3-day, and 7-day horizons over H3 resolution-7 cells. | 30 days × 17 features per day | Test accuracy, ROC-AUC, PR-AUC: NOT YET PROVIDED. |
+| **MLP Classifier (new)** | Predicts contextual hotspot categories (5 classes). | 43 features | Held-out metrics not recorded in the repo — see [docs/decisions-and-faq.md](docs/decisions-and-faq.md). |
+| **1/3/7-Day GRU Risk Models** | Predicts wildfire risk at 1-day, 3-day, and 7-day horizons over H3 resolution-7 cells. | 30 days × 17 features per day | Held-out metrics not recorded in the repo; the 7-day model is a weak signal — see [docs/decisions-and-faq.md](docs/decisions-and-faq.md). |
 
 ---
 

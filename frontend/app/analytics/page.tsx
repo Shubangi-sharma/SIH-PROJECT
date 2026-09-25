@@ -5,7 +5,7 @@
  * and ML hotspot catalogue. No estimates, no mock data.
  */
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import {
   BarChart,
   Bar,
@@ -23,19 +23,9 @@ import {
   Area,
   AreaChart,
 } from "recharts";
-import { Activity, BarChart3, Flame, Layers, PieChart as PieIcon, TrendingUp, Zap } from "lucide-react";
+import { BarChart3, Flame, PieChart as PieIcon, TrendingUp, Zap } from "lucide-react";
 import PyroLoader from "@/components/PyroLoader";
-import { useAnalyses, useFirms, useMlHotspots } from "@/lib/hooks";
-import {
-  MODEL_CLASSES,
-  MODEL_CLASS_LABELS,
-  MODEL_CLASS_COLORS,
-} from "@/lib/mlApi";
-import {
-  fetchHotspotClusters,
-  type HotspotClustersResponse,
-} from "@/lib/opsApi";
-import { HOTSPOT_CLASS_LABELS } from "@/lib/riskApi";
+import { useAnalyses, useFirms } from "@/lib/hooks";
 import { STATUS_META, STATUS_ORDER } from "@/lib/types";
 import { INDIA_STATE_BBOXES, stateForPoint, type BBox } from "@/lib/regions";
 import { frpColor } from "@/lib/firms";
@@ -86,7 +76,7 @@ function ChartCard({
           <div className="skeleton-shimmer h-full w-full rounded-lg" aria-hidden />
         ) : empty ? (
           <div className="flex h-full items-center justify-center px-6 text-center text-xs text-text-tertiary">
-            No data available yet — charts render only real stored observations.
+            No data available yet - charts render only real stored observations.
           </div>
         ) : (
           children
@@ -114,16 +104,13 @@ function SummaryStat({ label, value, accent }: { label: string; value: number | 
 export default function AnalyticsPage() {
   const { analyses, isLoading: analysesLoading, error: analysesError } = useAnalyses([INDIA_BBOX]);
   const { hotspots, isLoading: firmsLoading } = useFirms([INDIA_BBOX]);
-  const { hotspots: mlHotspots, isLoading: mlLoading, error: mlError } = useMlHotspots("all");
-
-  const [mlSource, setMlSource] = useState<"all" | "historical" | "live">("all");
 
   /* ── summary stats ─────────────────────────────────────────── */
   const totalDetections = hotspots.length;
   const criticalCount = useMemo(() => analyses.filter((a) => a.status === "critical").length, [analyses]);
   const suspiciousCount = useMemo(() => analyses.filter((a) => a.status === "suspicious").length, [analyses]);
   const avgFrp = useMemo(() => {
-    if (hotspots.length === 0) return "—";
+    if (hotspots.length === 0) return "-";
     return (hotspots.reduce((s, h) => s + h.frp, 0) / hotspots.length).toFixed(1);
   }, [hotspots]);
 
@@ -174,54 +161,6 @@ export default function AnalyticsPage() {
     return Object.entries(bands).map(([band, n]) => ({ band, detections: n }));
   }, [hotspots]);
 
-  /* ── ML category ───────────────────────────────────────────── */
-  const mlVisible = mlSource === "all" ? mlHotspots : mlHotspots.filter((h) => h.source === mlSource);
-  const mlFilteredByCategory = useMemo(
-    () =>
-      MODEL_CLASSES.map((cls) => ({
-        name: MODEL_CLASS_LABELS[cls],
-        hotspots: mlVisible.filter((h) => h.class === cls).length,
-        hex: MODEL_CLASS_COLORS[cls],
-      })),
-    [mlVisible],
-  );
-  const anyMlData = mlHotspots.length > 0;
-
-  /* ── clusters ──────────────────────────────────────────────── */
-  const [clusters, setClusters] = useState<HotspotClustersResponse | null>(null);
-  const [clustersError, setClustersError] = useState<string | null>(null);
-  const [clustersLoading, setClustersLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    setClustersLoading(true);
-    setClustersError(null);
-    fetchHotspotClusters({
-      minLat: INDIA_BBOX.south, maxLat: INDIA_BBOX.north,
-      minLng: INDIA_BBOX.west, maxLng: INDIA_BBOX.east,
-      limit: 2000,
-    })
-      .then((r) => { if (!cancelled) setClusters(r); })
-      .catch((err: unknown) => {
-        if (!cancelled) setClustersError(err instanceof Error ? err.message : "unavailable");
-      })
-      .finally(() => { if (!cancelled) setClustersLoading(false); });
-    return () => { cancelled = true; };
-  }, []);
-
-  const clusterList = useMemo(() => clusters?.hotspots ?? [], [clusters]);
-  const persistentCount = useMemo(() => clusterList.filter((h) => h.is_persistent).length, [clusterList]);
-  const needsReviewCount = useMemo(() => clusterList.filter((h) => h.needs_review).length, [clusterList]);
-  const clustersByClass = useMemo(
-    () =>
-      (clusters?.classes ?? []).map((cls) => ({
-        name: HOTSPOT_CLASS_LABELS[cls] ?? cls,
-        clusters: clusterList.filter((h) => h.class === cls).length,
-      })),
-    [clusters, clusterList],
-  );
-  const anyClusterData = clusterList.length > 0;
-
   const loading = analysesLoading && analyses.length === 0;
   const initialLoad = loading && firmsLoading && hotspots.length === 0;
 
@@ -232,7 +171,7 @@ export default function AnalyticsPage() {
       <div className="flex h-full items-center justify-center bg-gradient-mesh">
         <PyroLoader
           label="Compiling analytics"
-          sub="Crunching the stored FIRMS archive and ML catalogues — first load takes a moment"
+          sub="Crunching the stored FIRMS archive and ML catalogues - first load takes a moment"
         />
       </div>
     );
@@ -248,17 +187,15 @@ export default function AnalyticsPage() {
             <h1 className="font-display text-2xl font-semibold text-text-primary">Analytics</h1>
           </div>
           <p className="mt-1 max-w-2xl text-sm text-text-secondary">
-            Charts computed from stored FIRMS observations and ML service
-            catalogues — no estimates, no mock data.
+            Charts computed from the stored FIRMS archive and the backend&apos;s
+            live classifications. No estimates, no mock data.
           </p>
-          {(analysesError || mlError) && (
+          {analysesError && (
             <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-border-hairline bg-bg-surface/50 px-3 py-2 text-xs text-text-secondary">
               <Zap size={12} className="text-status-watch" aria-hidden />
               <span>
-                {analysesError ? "Backend analyses " : "ML hotspot catalogue "}
-                <span className="text-status-watch">offline</span>
-                {analysesError && mlError ? " — both sources " : " — "}
-                charts fill in as each source responds.
+                Backend analyses <span className="text-status-watch">offline</span>, charts
+                fill in as the source responds.
               </span>
             </p>
           )}
@@ -266,7 +203,7 @@ export default function AnalyticsPage() {
 
         {/* ── summary metrics ──────────────────────────────────── */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {[{"label":"VIIRS Detections (10d)","value":loading ? "—" : totalDetections,"accent":"#5B9BD5"},{"label":"Critical Facilities","value":loading ? "—" : criticalCount,"accent":"#E06060"},{"label":"Suspicious Facilities","value":loading ? "—" : suspiciousCount,"accent":"#E08A52"},{"label":"Avg FRP (MW)","value":loading ? "—" : avgFrp,"accent":"#4FB3B3"}].map((s) => (
+          {[{"label":"VIIRS Detections (10d)","value":loading ? "-" : totalDetections,"accent":"#5B9BD5"},{"label":"Critical Facilities","value":loading ? "-" : criticalCount,"accent":"#E06060"},{"label":"Suspicious Facilities","value":loading ? "-" : suspiciousCount,"accent":"#E08A52"},{"label":"Avg FRP (MW)","value":loading ? "-" : avgFrp,"accent":"#4FB3B3"}].map((s) => (
             <div key={s.label} className="dash-card rounded-xl px-4 py-3">
               <div
                 className={`font-display text-2xl font-semibold ${loading ? "animate-pulse" : ""}`}
@@ -372,7 +309,7 @@ export default function AnalyticsPage() {
           <ChartCard
             title="Fire Radiative Power Distribution"
             icon={Flame}
-            note="FRP bands — same gradient as the map markers."
+            note="FRP bands - same gradient as the map markers."
             loading={firmsLoading && hotspots.length === 0}
             empty={!firmsLoading && hotspots.length === 0}
             height={320}
@@ -393,113 +330,6 @@ export default function AnalyticsPage() {
           </ChartCard>
         </div>
 
-        {/* ── ML categories + cluster overview ─────────────────────── */}
-        <div className="grid gap-5 lg:grid-cols-2">
-          <ChartCard
-            title="ML Predicted Categories"
-            icon={Layers}
-            note="Supervised MLP model output — distinct from rule-based risk status."
-            loading={mlLoading && !anyMlData}
-            empty={!mlLoading && !anyMlData}
-            height={300}
-          >
-            <div className="mb-3 flex items-center gap-1.5">
-              {(["all", "historical", "live"] as const).map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setMlSource(s)}
-                  aria-pressed={mlSource === s}
-                  className={`rounded-md px-2.5 py-1 text-[11px] font-medium capitalize transition-colors ${
-                    mlSource === s
-                      ? "bg-accent-primary/15 text-accent-primary"
-                      : "text-text-tertiary hover:text-text-secondary"
-                  }`}
-                >
-                  {s}
-                </button>
-              ))}
-              <span className="ml-auto font-mono text-[10px] text-text-tertiary">
-                n = {mlVisible.length}
-              </span>
-            </div>
-            <ResponsiveContainer width="100%" height="85%">
-              <BarChart data={mlFilteredByCategory} layout="vertical" margin={{ top: 4, right: 16, bottom: 0, left: 8 }}>
-                <CartesianGrid stroke={GRID} strokeDasharray="3 3" horizontal={false} />
-                <XAxis type="number" tick={AXIS} axisLine={{ stroke: GRID }} tickLine={false} allowDecimals={false} />
-                <YAxis
-                  type="category"
-                  dataKey="name"
-                  tick={{ ...AXIS, fontSize: 10 }}
-                  axisLine={false}
-                  tickLine={false}
-                  width={160}
-                />
-                <ReTooltip contentStyle={tooltipStyle} cursor={{ fill: "rgba(255,255,255,0.02)" }} />
-                <Bar dataKey="hotspots" radius={[0, 4, 4, 0]} maxBarSize={18}>
-                  {mlFilteredByCategory.map((r) => (
-                    <Cell key={r.name} fill={r.hex} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </ChartCard>
-
-          <ChartCard
-            title="Hotspot Clusters"
-            icon={Activity}
-            note="H3-aggregated clusters from the ML pipeline with contextual classification."
-            loading={clustersLoading && !anyClusterData}
-            empty={!clustersLoading && !anyClusterData && !clustersError}
-            height={300}
-          >
-            {clustersError ? (
-              <p className="flex h-full items-center justify-center px-6 text-center text-xs text-text-tertiary">
-                Cluster catalogue offline ({clustersError}). Run the ML pipeline from Settings to populate.
-              </p>
-            ) : (
-              <>
-                <div className="mb-3 grid grid-cols-3 gap-2">
-                  <div className="rounded-lg bg-bg-inset/50 px-3 py-2">
-                    <div className="font-display text-lg font-semibold text-text-primary">{clusterList.length}</div>
-                    <div className="text-[9px] uppercase tracking-wider text-text-tertiary">clusters</div>
-                  </div>
-                  <div className="rounded-lg bg-bg-inset/50 px-3 py-2">
-                    <div className="font-display text-lg font-semibold text-status-watch">{persistentCount}</div>
-                    <div className="text-[9px] uppercase tracking-wider text-text-tertiary">persistent</div>
-                  </div>
-                  <div className="rounded-lg bg-bg-inset/50 px-3 py-2">
-                    <div className="font-display text-lg font-semibold text-status-critical">{needsReviewCount}</div>
-                    <div className="text-[9px] uppercase tracking-wider text-text-tertiary">review</div>
-                  </div>
-                </div>
-                {anyClusterData && (
-                  <ResponsiveContainer width="100%" height={170}>
-                    <BarChart data={clustersByClass} layout="vertical" margin={{ top: 0, right: 16, bottom: 0, left: 8 }}>
-                      <CartesianGrid stroke={GRID} strokeDasharray="3 3" horizontal={false} />
-                      <XAxis type="number" tick={AXIS} axisLine={{ stroke: GRID }} tickLine={false} allowDecimals={false} />
-                      <YAxis
-                        type="category"
-                        dataKey="name"
-                        tick={{ ...AXIS, fontSize: 10 }}
-                        axisLine={false}
-                        tickLine={false}
-                        width={160}
-                      />
-                      <ReTooltip contentStyle={tooltipStyle} cursor={{ fill: "rgba(255,255,255,0.02)" }} />
-                      <Bar dataKey="clusters" fill="#5B9BD5" radius={[0, 4, 4, 0]} maxBarSize={16} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                )}
-                {clusters?.meta.stale && (
-                  <p className="mt-2 text-[10px] text-status-watch">
-                    Showing stale cached clusters — ML service unreachable.
-                  </p>
-                )}
-              </>
-            )}
-          </ChartCard>
-        </div>
       </div>
     </div>
   );

@@ -3,7 +3,7 @@
 /**
  * PYROSENSE — /api/v1 BFF client (risk + hotspot clusters + cells).
  *
- * Mirrors docs/api-contract-v2.md and backend/src/routes/v1.route.ts.
+ * Mirrors backend/src/routes/v1.route.ts (the /api/v1 BFF contract).
  * The BFF validates the ML service with Zod and serves stale-but-labeled
  * data on degradation; this client surfaces that honesty via `meta`
  * (data_timestamp, stale flag) instead of hiding it.
