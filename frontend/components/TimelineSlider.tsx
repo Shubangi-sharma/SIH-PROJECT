@@ -92,7 +92,7 @@ export default function TimelineSlider({
   return (
     <div
       className={clsx(
-        "flex items-center gap-3 rounded-lg border border-border-hairline bg-bg-raised/95 px-3 py-2 shadow-lg shadow-black/40 backdrop-blur",
+        "flex items-center gap-3 rounded-xl px-4 py-2.5",
         className,
       )}
     >

@@ -321,10 +321,11 @@ export default function MapPage() {
             filters={filters}
             onFiltersChange={setFilters}
           >
-            {/* FIRMS feed status — always honest: live count or explicit error */}
+            {/* FIRMS feed status — always honest: live count or explicit error.
+                Sits one row above the timeline so the two never collide. */}
             <div
               role="status"
-              className="map-glass absolute bottom-4 left-4 z-[1000] flex max-w-[calc(100%-560px)] items-center gap-2 rounded-lg px-3 py-2 font-mono text-[11px] text-text-secondary lg:max-w-[calc(100%-420px)]"
+              className="map-glass absolute bottom-[64px] left-4 z-[1000] flex max-w-[420px] items-center gap-2 rounded-lg px-3 py-2 font-mono text-[11px] text-text-secondary"
             >
               <span
                 className={clsx(
@@ -344,12 +345,12 @@ export default function MapPage() {
               <TimelineSlider
                 hotspots={hotspots}
                 onFilterDate={setFilterDate}
-                className="map-glass absolute bottom-4 left-1/2 z-[1000] w-[min(480px,calc(100%-560px))] -translate-x-1/2 lg:w-[min(480px,calc(100%-420px))]"
+                className="map-glass absolute bottom-4 left-1/2 z-[1000] w-[min(480px,calc(100%-32px))] -translate-x-1/2"
               />
             )}
 
             {/* replay transport — appears only when a facility is selected (B1) */}
-            <ReplayControls replay={replay} className="map-glass absolute bottom-4 left-1/2 z-[1000] -translate-x-1/2" />
+            <ReplayControls replay={replay} className="absolute bottom-4 left-1/2 z-[1000] -translate-x-1/2" />
 
             {/* backend status chips */}
             {analysesError && (
