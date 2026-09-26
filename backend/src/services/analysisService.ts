@@ -32,6 +32,14 @@ import {
   CLASSIFICATION_LABELS,
   type ThermalClassification,
 } from "./classificationService.js";
+import {
+  predictFireTag,
+  FIRE_TAG_META,
+  type FireTag,
+  type FireTagEnvironment,
+  type FireTagResult,
+  type FireTagWeather,
+} from "./fireTagService.js";
 
 export interface FacilityAnalysis {
   facility: FacilityRow;
@@ -46,6 +54,14 @@ export interface FacilityAnalysis {
   baselineMeanFrp: number | null;
   /** VIIRS confidence-band split of the live window (Signal Quality, C2). */
   liveConfidenceSplit: { high: number; nominal: number; low: number };
+  /**
+   * Contextual "Predicted Fire Type" — what is actually burning here
+   * (agricultural burn / forest fire / campfire / industrial incident …),
+   * predicted from FRP physics + day/night + spread + environment. Computed
+   * WITHOUT live environment in the bulk path (rule evidence only); the
+   * single-facility endpoint enriches it with the ML service's observations.
+   */
+  predictedTag: FireTagResult;
 }
 
 /** Persistence block — computed from the stored FIRMS archive (PDF §4). */
@@ -96,6 +112,29 @@ const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.l
 function dateDaysAgo(days: number, today: Date): string {
   const d = new Date(today.getTime() - days * 86_400_000);
   return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Contextual fire tag from classification signals (environment-free variant
+ * used by the bulk path — see predictedFireTag for the env-enriched form).
+ */
+function tagFromClassification(
+  facility: FacilityRow,
+  c: Classification,
+): FireTagResult {
+  const unmatched = c.detectionCount === 0;
+  return predictFireTag({
+    liveMeanFrp: c.liveMeanFrp,
+    livePeakFrp: c.livePeakFrp,
+    liveDetectionCount: c.liveCount,
+    totalDetections: c.detectionCount,
+    uniqueDays: c.uniqueHistoryDays,
+    spreadKm: c.liveSpreadKm,
+    nightRatio: c.nightRatio,
+    facilityType: unmatched ? null : facility.type,
+    unmatched,
+    environment: null,
+  });
 }
 
 /**
@@ -177,6 +216,7 @@ export function analyzeAllFacilities(
         liveMeanFrp: c.liveMeanFrp,
         baselineMeanFrp: c.baseline ? c.baseline.mean : null,
         liveConfidenceSplit: c.liveConfidenceSplit,
+        predictedTag: tagFromClassification(f, c),
       });
     }
   }
@@ -194,6 +234,7 @@ export function analyzeFacility(
   facts: SummaryFacts;
   persistence: PersistenceBlock;
   fireCharacteristics: FireCharacteristicsBlock;
+  predictedTag: FireTagResult;
 } {
   const todayUtc = todayUtc0;
   const fromDate = dateDaysAgo(HISTORY_WINDOW_DAYS, todayUtc);
@@ -311,7 +352,58 @@ export function analyzeFacility(
     satelliteSplit,
   };
 
-  return { classification: c, narrative, facts, persistence, fireCharacteristics };
+  return {
+    classification: c,
+    narrative,
+    facts,
+    persistence,
+    fireCharacteristics,
+    predictedTag: tagFromClassification(facility, c),
+  };
+}
+
+/* ── environment-enriched predicted tag (single-facility endpoints) ────── */
+
+/**
+ * Recompute the contextual fire tag WITH live environment observations
+ * (land cover / surroundings from the ML service's feature modules). The
+ * ML call happens in the controller (async); this stays sync over the
+ * already-classified facility. Falls back to the environment-free tag if
+ * the environment block is missing — the tag is always present.
+ */
+export function predictedFireTag(
+  facility: FacilityRow,
+  c: Classification,
+  environment: FireTagEnvironment | null | undefined,
+  weather?: FireTagWeather | null,
+  latestBrightnessK?: number | null,
+): FireTagResult {
+  const unmatched = c.detectionCount === 0;
+  const base = {
+    liveMeanFrp: c.liveMeanFrp,
+    livePeakFrp: c.livePeakFrp,
+    liveDetectionCount: c.liveCount,
+    totalDetections: c.detectionCount,
+    uniqueDays: c.uniqueHistoryDays,
+    spreadKm: c.liveSpreadKm,
+    nightRatio: c.nightRatio,
+    facilityType: unmatched ? null : facility.type,
+    unmatched,
+  };
+  if (!environment && !weather && latestBrightnessK == null) {
+    return tagFromClassification(facility, c);
+  }
+  return predictFireTag({
+    ...base,
+    environment: environment ?? null,
+    weather: weather ?? null,
+    latestBrightnessK: latestBrightnessK ?? null,
+  });
+}
+
+/** Label/hex/blurb metadata for a tag — for API consumers (frontend chips). */
+export function fireTagMeta(tag: FireTag): (typeof FIRE_TAG_META)[FireTag] {
+  return FIRE_TAG_META[tag];
 }
 
 /** "YYYY-MM-DD" → [y, m-1, d] for Date.UTC spread. */

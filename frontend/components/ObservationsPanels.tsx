@@ -12,7 +12,7 @@
 
 import React from "react";
 import useSWR from "swr";
-import { AlertTriangle, CheckCircle2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, RefreshCw } from "lucide-react";
 import clsx from "clsx";
 import PyroLoader from "./PyroLoader";
 import { fetchObservations, type ObservationsResponseDto } from "@/lib/mlApi";
@@ -75,14 +75,16 @@ function MonoStat({ label, value }: { label: string; value: string }) {
 
 function ProvenanceChip({ block, src }: { block: string; src: string }) {
   const degraded = src === "unavailable";
+  const stale = src === "stale_cache";
   return (
     <span
       className={clsx(
         "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium",
-        degraded ? "bg-status-watch/15 text-status-watch" : "bg-bg-raised text-text-secondary",
+        degraded || stale ? "bg-status-watch/15 text-status-watch" : "bg-bg-raised text-text-secondary",
       )}
+      title={stale ? "Live source unreachable — showing the last successful observation" : undefined}
     >
-      {degraded ? <AlertTriangle size={9} aria-hidden /> : <CheckCircle2 size={9} aria-hidden />}
+      {degraded || stale ? <AlertTriangle size={9} aria-hidden /> : <CheckCircle2 size={9} aria-hidden />}
       {block}: {src}
     </span>
   );
@@ -192,16 +194,30 @@ export default function ObservationsPanels({ lat, lng }: { lat: number; lng: num
      returning to a facility (or comparing neighbours) renders instantly from
      cache while a background revalidation refreshes. keepPreviousData keeps
      the previous point's panels visible (labelled by its own timestamp)
-     instead of flashing a loader on every navigation. */
+     instead of flashing a loader on every navigation. The refresh button
+     bumps a generation counter and re-fetches with refresh=1, which tells
+     the ML service to bypass its per-block caches and re-query the live
+     sources ("real" data on demand, not a bigger client cache). */
+  const [refreshGen, setRefreshGen] = React.useState(0);
+  const [refreshing, setRefreshing] = React.useState(false);
   const { data: obs, error, isLoading } = useSWR<ObservationsResponseDto>(
-    ["ml-observations", lat, lng] as const,
-    ([, latK, lngK]: readonly [string, number, number]) => fetchObservations(latK, lngK),
+    ["ml-observations", lat, lng, refreshGen] as const,
+    ([, latK, lngK, , ]: readonly [string, number, number, number, unknown]) =>
+      fetchObservations(latK, lngK, { refresh: refreshGen > 0 }),
     {
       revalidateOnFocus: false,
       keepPreviousData: true,
       dedupingInterval: 60_000,
     },
   );
+
+  const handleRefresh = React.useCallback(() => {
+    setRefreshing(true);
+    setRefreshGen((g) => g + 1);
+  }, []);
+  React.useEffect(() => {
+    if (obs) setRefreshing(false);
+  }, [obs]);
 
   if (isLoading) {
     return (
@@ -218,7 +234,17 @@ export default function ObservationsPanels({ lat, lng }: { lat: number; lng: num
   if (error) {
     return (
       <section className="dash-card rounded-xl p-5">
-        <h3 className="font-display text-sm font-semibold text-text-primary">Environment observations</h3>
+        <div className="flex items-center justify-between">
+          <h3 className="font-display text-sm font-semibold text-text-primary">Environment observations</h3>
+          <button
+            type="button"
+            onClick={handleRefresh}
+            className="flex items-center gap-1.5 rounded-md border border-border-hairline bg-bg-surface px-2 py-1 text-[11px] font-medium text-text-secondary transition-colors duration-150 hover:border-border-strong hover:text-text-primary"
+          >
+            <RefreshCw size={11} className={refreshing ? "animate-spin" : ""} />
+            Retry live
+          </button>
+        </div>
         <p className="mt-3 rounded-lg border border-border-hairline bg-bg-raised px-3 py-2 text-xs leading-relaxed text-text-secondary">
           {error instanceof Error ? error.message : "Observations unavailable."} The
           ML service computes these live; check that it is reachable and retry.
@@ -231,6 +257,25 @@ export default function ObservationsPanels({ lat, lng }: { lat: number; lng: num
 
   return (
     <>
+      <div className="flex items-center justify-between px-1">
+        <p className="text-[10px] text-text-tertiary">
+          Computed live for {obs.latitude.toFixed(3)}°, {obs.longitude.toFixed(3)}°
+          {obs.data_timestamp
+            ? ` · ${new Date(obs.data_timestamp).toISOString().replace("T", " ").slice(0, 16)} UTC`
+            : ""}
+        </p>
+        <button
+          type="button"
+          onClick={handleRefresh}
+          disabled={refreshing}
+          title="Re-query Overpass and Open-Meteo now, bypassing the service cache"
+          className="flex items-center gap-1.5 rounded-md border border-border-hairline bg-bg-surface px-2 py-1 text-[11px] font-medium text-text-secondary transition-colors duration-150 hover:border-border-strong hover:text-text-primary disabled:opacity-50"
+        >
+          <RefreshCw size={11} className={refreshing ? "animate-spin" : ""} />
+          {refreshing ? "Refreshing…" : "Refresh live"}
+        </button>
+      </div>
+
       {obs.warnings.length > 0 && (
         <section className="rounded-xl border border-border-hairline bg-bg-surface p-4">
           <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest text-status-watch">
@@ -253,7 +298,7 @@ export default function ObservationsPanels({ lat, lng }: { lat: number; lng: num
           <ProvenanceChip block="source" src={obs.land_cover.provenance} />
         </div>
         <p className="mt-1 text-[11px] leading-relaxed text-text-tertiary">
-          Six Dynamic Earth land-cover ratios around the point.
+          Land-cover class shares around the point (OSM area features within ~1 km).
         </p>
         <div className="mt-3">
           <LandCoverBody lc={obs.land_cover} />

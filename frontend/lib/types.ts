@@ -71,12 +71,91 @@ export interface FacilityAnalysis {
   nearestKm: number | null;
   /** Usable detections within the radius in the live window. */
   detectionCount: number;
+  /** Confidence-weighted mean FRP of the live window, MW (null = none). */
+  liveMeanFrp: number | null;
+  /** Recency×confidence-weighted full-history baseline FRP mean (null = no baseline). */
+  baselineMeanFrp: number | null;
+  /**
+   * Contextual Predicted Fire Type from the backend (optional: older cached
+   * analyses predate the field).
+   */
+  predictedTag?: { tag: string; confidence: number; reasons: string[]; provenance?: string };
   /**
    * VIIRS confidence-band split of the live window (backend Track C).
    * Optional: older cached analyses may predate the field.
    */
   liveConfidenceSplit?: { high: number; nominal: number; low: number };
 }
+
+/* ------------------------------------------------------------------ */
+/* Predicted Fire Type (backend fireTagService — contextual tagging)    */
+/* ------------------------------------------------------------------ */
+
+export const FIRE_TAG_META: Record<
+  string,
+  { label: string; hex: string; blurb: string }
+> = {
+  crop_stubble_burn: {
+    label: "Agricultural burn",
+    hex: "#E0A84C",
+    blurb: "Stubble/crop-residue burning — seasonal, daytime, low-power, on farmland.",
+  },
+  forest_wildfire: {
+    label: "Forest wildfire",
+    hex: "#E06060",
+    blurb: "Vegetation fire in wooded land — spreading, high radiant power.",
+  },
+  grass_shrub_burn: {
+    label: "Grass/shrub burn",
+    hex: "#CBB26A",
+    blurb: "Open-land grass or scrub fire — moderate power, dispersed points.",
+  },
+  campfire: {
+    label: "Campfire / small fire",
+    hex: "#9CB86E",
+    blurb: "Tiny, isolated, low-power heat source — human-scale, short-lived.",
+  },
+  structure_fire_settlement: {
+    label: "Fire near settlement",
+    hex: "#E08A52",
+    blurb: "Hot, persistent heat close to built-up areas / housing.",
+  },
+  industrial_incident: {
+    label: "Industrial incident",
+    hex: "#E06060",
+    blurb: "Elevated FRP at an industrial asset, above its own baseline.",
+  },
+  refinery_fire: {
+    label: "Refinery / plant fire",
+    hex: "#C46A6A",
+    blurb: "Large sustained burning at a matched refinery or fuel-storage site.",
+  },
+  gas_flare: {
+    label: "Gas flare",
+    hex: "#9186C4",
+    blurb: "Steady, single-point, continuous burning at energy infrastructure.",
+  },
+  mining_heat: {
+    label: "Mining heat",
+    hex: "#4FB3B3",
+    blurb: "Persistent low-power heating at/near a mine or quarry.",
+  },
+  waste_burning: {
+    label: "Waste burning",
+    hex: "#A0927C",
+    blurb: "Persistent low-to-moderate heat on open/bare ground near settlement — open dumping.",
+  },
+  unknown: {
+    label: "Unclassified",
+    hex: "#5D6570",
+    blurb: "Not enough evidence to predict the fire type yet.",
+  },
+};
+
+export const fireTagMeta = (
+  tag: string | undefined | null,
+): { label: string; hex: string; blurb: string } =>
+  (tag && FIRE_TAG_META[tag]) || FIRE_TAG_META.unknown;
 
 export const STATUS_ORDER: RiskStatus[] = [
   "normal",

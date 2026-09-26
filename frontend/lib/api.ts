@@ -50,6 +50,24 @@ export interface FacilityAnalysisDto {
    * `low` counts gated-out rows too — Signal Quality shows the real mix.
    */
   liveConfidenceSplit?: { high: number; nominal: number; low: number };
+  /**
+   * Contextual "Predicted Fire Type" — the backend's evidence-based
+   * prediction of what is actually burning (agricultural burn, forest fire,
+   * campfire, industrial incident, …). Optional: older cached analyses
+   * predate the field.
+   */
+  predictedTag?: PredictedTagDto;
+}
+
+/** Backend's contextual predicted fire type (fireTagService). */
+export interface PredictedTagDto {
+  tag: string;
+  /** 0–1 dominance-based belief — a prediction, never a measurement. */
+  confidence: number;
+  /** human-readable evidence that drove the prediction */
+  reasons: string[];
+  /** "ml_observations" (env-enriched) | "fire_physics_only" (fallback) */
+  provenance?: string;
 }
 
 export interface WhatChangedRowDto {
@@ -113,6 +131,8 @@ export interface FacilityAnalysisResponseDto {
   /** PDF §4 groups (optional: older backends may omit them). */
   persistence?: PersistenceBlockDto;
   fireCharacteristics?: FireCharacteristicsBlockDto;
+  /** Contextual predicted fire type (environment-enriched server-side). */
+  predictedTag?: PredictedTagDto;
 }
 
 export interface SummaryResponseDto {

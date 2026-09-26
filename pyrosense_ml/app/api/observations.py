@@ -42,6 +42,12 @@ _DISPLAY_KEYS = {
     "agriculture": "distance_to_agriculture_km",
 }
 
+# Inverse of _DISPLAY_KEYS: module distance key → display key. Used to key
+# proximity flags by the SAME display names the distance cards use (the old
+# code keyed them by PROXIMITY_RULES schema names, producing e.g.
+# "fuel 2km" next to the "Fuel storage" card — two names, one category).
+_MODULE_TO_DISPLAY = {module: display for display, module in _DISPLAY_KEYS.items()}
+
 # Dynamic-Earth-style classes surfaced by the UI. snow_and_ice has no
 # OSM-derived source — it is always the 0.0 prior (documented approximation).
 _LC_CLASSES = [
@@ -109,7 +115,10 @@ def _land_cover_block(lc) -> tuple[dict, list[str]]:
 def _surroundings_block(osm) -> tuple[dict, list[str]]:
     warnings: list[str] = []
     distances: dict[str, float | None] = {k: None for k in _DISPLAY_KEYS}
-    flags: dict[str, bool | None] = {f.removeprefix("near_"): None for f in PROXIMITY_RULES}
+    # Flags are keyed by the DISPLAY category names (industrial/power/…),
+    # matching the distance cards — no more duplicated "fuel 2km" vs
+    # "Fuel storage" entries from mixing schema and display vocabularies.
+    flags: dict[str, bool | None] = {k: None for k in _DISPLAY_KEYS}
     if osm is None:
         warnings.append("surroundings unavailable — Overpass unreachable")
         return {
@@ -123,8 +132,6 @@ def _surroundings_block(osm) -> tuple[dict, list[str]]:
         warnings.append(
             "no OSM infrastructure data for this point (nothing within 50 km, or Overpass unreachable)"
         )
-    # module key → display key (fuel keeps its module-era name here).
-    module_to_display = {m: d for d, m in _DISPLAY_KEYS.items()}
     for display, module_key in _DISPLAY_KEYS.items():
         v = raw.get(module_key)
         distances[display] = round(float(v), 4) if v is not None else None
@@ -137,7 +144,9 @@ def _surroundings_block(osm) -> tuple[dict, list[str]]:
             dist_key,
         )
         v = raw.get(module_key)
-        display_key = module_to_display.get(module_key, dist_key)
+        display_key = _MODULE_TO_DISPLAY.get(module_key)
+        if display_key is None:
+            continue
         flags[display_key] = (v * 1000.0 <= threshold_m) if v is not None else None
 
     provenance = (
@@ -151,7 +160,9 @@ def _surroundings_block(osm) -> tuple[dict, list[str]]:
 def _weather_block(wx) -> tuple[dict, list[str]]:
     warnings: list[str] = []
     if wx is None or wx.provenance == "unavailable":
-        warnings.append("weather unavailable — Open-Meteo unreachable")
+        warnings.append(
+            "weather unavailable — Open-Meteo archive and forecast endpoints both unreachable"
+        )
         out: dict[str, object] = {k: None for k in _WEATHER_DISPLAY}
         out["observation_count"] = None
         out["lookback_days"] = settings.WEATHER_LOOKBACK_DAYS
@@ -172,16 +183,19 @@ def _weather_block(wx) -> tuple[dict, list[str]]:
 async def observations(
     lat: float = Query(..., ge=-90, le=90, description="Point latitude"),
     lng: float = Query(..., ge=-180, le=180, description="Point longitude"),
+    refresh: bool = Query(False, description="Bypass per-block caches and re-query the live sources"),
 ):
     """Live land-cover / surroundings / weather observations for one point.
 
     Computed on demand by the same feature-engineering modules /predict uses
     (in parallel); nothing is persisted and no model inference runs here.
+    `refresh=1` re-queries Overpass / Open-Meteo instead of serving the
+    in-process cache (the UI's refresh button).
     """
     lc_res, osm_res, wx_res = await asyncio.gather(
-        get_land_cover(lat, lng),
-        get_osm_distances(lat, lng),
-        get_weather(lat, lng),
+        get_land_cover(lat, lng, refresh=refresh),
+        get_osm_distances(lat, lng, refresh=refresh),
+        get_weather(lat, lng, refresh=refresh),
         return_exceptions=True,
     )
     if isinstance(lc_res, BaseException):

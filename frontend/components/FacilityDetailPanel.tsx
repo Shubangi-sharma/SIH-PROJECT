@@ -9,6 +9,8 @@ import HealthScoreRing from "@/components/HealthScoreRing";
 import WhatChangedPanel from "@/components/WhatChangedPanel";
 import AiSummaryBlock from "@/components/AiSummaryBlock";
 import IncidentTimeline from "@/components/IncidentTimeline";
+import PinButton from "@/components/PinButton";
+import { FireTagChip, FireTagFocus } from "@/components/FireTagCard";
 
 /** Small mono readout. */
 function MonoStat({ label, value }: { label: string; value: string }) {
@@ -63,6 +65,12 @@ export default function FacilityDetailPanel({
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <StatusBadge status={analysis.status} />
+            {analysis.predictedTag && analysis.predictedTag.tag !== "unknown" && (
+              <FireTagChip
+                tag={analysis.predictedTag.tag}
+                confidence={analysis.predictedTag.confidence}
+              />
+            )}
             {analysis.detectionCount > 0 && (
               <span
                 className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-accent-secondary"
@@ -107,6 +115,16 @@ export default function FacilityDetailPanel({
             </div>
           </div>
 
+          {/* contextual fire type — the "what is actually burning" focus
+              callout, sitting directly under the health score */}
+          <FireTagFocus
+            tag={analysis.predictedTag?.tag}
+            confidence={analysis.predictedTag?.confidence}
+            reasons={analysis.predictedTag?.reasons}
+            provenance={analysis.predictedTag?.provenance}
+            onOpenFull={onOpenFullPage}
+          />
+
           {analysis.detectionCount === 0 && (
             <p className="rounded-lg border border-border-hairline bg-bg-raised px-3 py-2 text-xs text-text-secondary">
               No thermal activity detected - this facility sits in a quiet
@@ -116,6 +134,10 @@ export default function FacilityDetailPanel({
 
           {/* actions - full page first, it's the primary destination */}
           <div className="grid grid-cols-1 gap-2">
+            <PinButton
+              facilityId={analysis.facility.id}
+              facilityName={analysis.facility.name}
+            />
             <button
               type="button"
               onClick={onOpenFullPage}

@@ -192,6 +192,12 @@ export interface Classification {
   baseline: WeightedBaseline | null;
   newDetectionsLast5d: number;
   newDetectionsPriorNearby: number;
+  /** max spread of LIVE usable detections from their centroid, km (contextual tagging). */
+  liveSpreadKm: number;
+  /** share of LIVE usable detections from night passes, 0–1 (contextual tagging). */
+  nightRatio: number | null;
+  /** distinct acquisition days across ALL usable history (contextual tagging). */
+  uniqueHistoryDays: number;
 }
 
 export interface ClassifyInput {
@@ -228,40 +234,118 @@ export function coefficientOfVariation(xs: number[]): number {
 /* ── Thermal Health Score (100 − penalties) ─────────────────────────── */
 
 export interface HealthScoreInput {
-  detectionCount: number;
-  meanFrp: number;
+  /** usable detections in the LIVE window (the behaviour being graded) */
+  liveCount: number;
+  /** confidence-weighted mean FRP of the live window, MW */
+  liveMeanFrp: number;
+  /** peak FRP of the live window, MW (a real observation, unweighted) */
+  livePeakFrp: number;
+  /** FRP coefficient of variation across the live window */
   cvFrp: number;
-  hasRecentDetection: boolean;
-  /** recent mean FRP vs weighted baseline (ratio, >1 = elevated) */
+  /** live detections spread across space, km (0 for a single point) */
+  spreadKm: number;
+  /** max age in days of the live-window detections (0 = today) */
+  newestAgeDays: number;
+  /** unique acquisition days in the live window */
+  liveUniqueDays: number;
+  /** recent mean FRP vs weighted baseline (ratio, >1 = elevated); 0 = no trusted baseline */
   frpRatioVsBaseline: number;
+  /** weighted sample count behind the baseline (evidence quality) */
+  baselineWeightSum: number;
+  /** share of live detections that were low-confidence (gated out) — data trust */
+  lowConfidenceShare: number;
 }
 
 /**
  * Thermal Health Score — 100 minus penalties, clamped to [0, 100].
- * Same weighting philosophy as Pass 5, but the magnitude/trend terms now
- * compare against the recency-weighted FULL-history baseline instead of a
- * 10-day mean, so a quiet-but-degraded site and a chronically-flaring site
- * are scored against their own history, not each other's.
+ *
+ * Design (v2 — evidence-quality weighting):
+ *  • The graded quantity is the LIVE window (10 d), not all history —
+ *    a site that burned for a month last quarter and is quiet today is
+ *    HEALTHY today. The old input mixed full-history counts into every term.
+ *  • Magnitude is LOG-scaled: FRP is heavy-tailed (one 400 MW flare next to
+ *    ten 3 MW flickers); a linear /100 term let a single outlier saturate
+ *    the whole score. log1p gives every doubling of power a similar penalty
+ *    step and needs no outlier clamp.
+ *  • Frequency counts ACTIVE DAYS, not raw detections — satellite passes
+ *    can repeat on one fire; what matters operationally is how many days
+ *    it was actually burning.
+ *  • Spatial spread penalises fire that is GROWING across the site
+ *    (single-point heating vs multi-hectare spread) — a physical signal the
+ *    old score ignored entirely.
+ *  • Every penalty is scaled by EVIDENCE QUALITY: few live observations
+ *    (short window) and a low-confidence mix shrink the penalties toward
+ *    0, so thin/low-trust data scores cautious (near 100) instead of
+ *    being punished as if it were certain. Evidence quality never ADDS
+ *    penalty — it only discounts the penalties we cannot trust.
+ *  • Trend vs the site's OWN recency×confidence-weighted baseline is kept,
+ *    but trusted only when the baseline carries enough weighted samples
+ *    (see trustedTrend below) — one stale baseline row can no longer
+ *    manufacture a fake "2× baseline" escalation.
  */
 export function computeHealthScore(input: HealthScoreInput): number {
-  const { detectionCount, meanFrp, cvFrp, hasRecentDetection, frpRatioVsBaseline } = input;
-  if (detectionCount === 0) return HEALTHY_BASELINE;
+  const {
+    liveCount,
+    liveMeanFrp,
+    livePeakFrp,
+    cvFrp,
+    spreadKm,
+    newestAgeDays,
+    liveUniqueDays,
+    frpRatioVsBaseline,
+    baselineWeightSum,
+    lowConfidenceShare,
+  } = input;
 
-  // frequency: persistent heating inside the radius (10+ dets saturate)
-  const frequencyPenalty = 28 * Math.min(1, detectionCount / 10);
-  // magnitude: MW of radiative power near the asset = raw exposure
-  const magnitudePenalty = 30 * Math.min(1, meanFrp / 100);
-  // instability: erratic FRP behaviour
-  const instabilityPenalty = 22 * Math.min(1, cvFrp / 0.6);
-  // recency: active heating in the last 24 h
-  const recencyPenalty = hasRecentDetection ? 20 : 0;
-  // trend: recent FRP elevated vs the site's own weighted baseline.
-  // ratio 1.0 → 0 pts, ratio 2.0 → 20 pts (saturates at 2× baseline).
-  const trendPenalty =
-    frpRatioVsBaseline > 1 ? 20 * Math.min(1, frpRatioVsBaseline - 1) : 0;
+  // Nothing usable in the live window → quiet site, full health.
+  if (liveCount === 0) return HEALTHY_BASELINE;
 
-  const score =
-    100 - frequencyPenalty - magnitudePenalty - instabilityPenalty - recencyPenalty - trendPenalty;
+  // Evidence quality ∈ (0, 1]: how much we trust the live-window picture.
+  //  • sample floor: 1 det = 0.45, 2 = 0.7, 3+ = 0.85, 6+ = 1.0
+  //  • trust floor: low-band share of ALL nearby live rows (gated-out rows
+  //    still tell us the sensor was struggling) — up to −0.35
+  const sampleQuality = Math.min(1, 0.45 + 0.2 * liveCount + (liveCount >= 6 ? 0.15 : 0));
+  const trustQuality = Math.max(0.65, 1 - 0.35 * Math.min(1, Math.max(0, lowConfidenceShare)));
+  const evidence = sampleQuality * trustQuality;
+
+  // magnitude: log-scaled on the mean (steady output) with a peak kicker for
+  // rare extreme events. log1p(100)/log1p(500) ≈ 0.62; the peak term only
+  // bites above ~150 MW (one-off sensor artifacts stay damped by evidence).
+  const magnitudePenalty =
+    30 * (Math.log1p(Math.max(0, liveMeanFrp)) / Math.log1p(500)) +
+    10 * Math.min(1, Math.max(0, (livePeakFrp - 150) / 350));
+
+  // frequency: ACTIVE DAYS in the live window (of 10), not raw detections.
+  const frequencyPenalty = 22 * Math.min(1, liveUniqueDays / LIVE_WINDOW_DAYS);
+
+  // instability: erratic FRP behaviour within the window (needs 2+ points).
+  const instabilityPenalty = 12 * Math.min(1, Math.max(0, cvFrp) / 0.8);
+
+  // spread: heating footprint growth across the site (5 km radius ≈ full).
+  const spreadPenalty = 14 * Math.min(1, Math.max(0, spreadKm) / 5);
+
+  // recency: graded, not binary — today 12 pts, 2 days ago 8, within the
+  // window ≥1, older than the window costs nothing (it can't be "recent").
+  const recencyPenalty =
+    newestAgeDays <= 0 ? 12 : newestAgeDays <= 1 ? 10 : newestAgeDays <= 3 ? 6 : newestAgeDays <= LIVE_WINDOW_DAYS ? 2 : 0;
+
+  // trend: recent FRP vs the site's own weighted baseline — trusted only
+  // with enough weighted evidence behind the baseline (≥ 2.0 weight-sum ≈
+  // a couple of recent high-confidence rows or a longer medium-confidence
+  // history). ratio 1.0 → 0, 2.0 → 14, saturates at 3× baseline.
+  const trustedTrend = baselineWeightSum >= 2.0 && frpRatioVsBaseline > 0;
+  const trendPenalty = trustedTrend
+    ? 14 * Math.min(1, Math.max(0, frpRatioVsBaseline - 1) / 2)
+    : 0;
+
+  // Evidence discount: thin/low-trust windows get most (not all) of their
+  // penalty forgiven — but recency is a timing fact (cheap to observe) and
+  // is discounted less than the physics terms.
+  const discounted =
+    evidence * (magnitudePenalty + frequencyPenalty + instabilityPenalty + spreadPenalty + trendPenalty) +
+    (0.5 + 0.5 * evidence) * recencyPenalty;
+
+  const score = 100 - Math.max(discounted, 0);
   return Math.round(Math.max(0, Math.min(100, score)));
 }
 
@@ -328,6 +412,9 @@ export function classifyFromDetections(input: ClassifyInput): Classification {
       baseline: null,
       newDetectionsLast5d: 0,
       newDetectionsPriorNearby: 0,
+      liveSpreadKm: 0,
+      nightRatio: null,
+      uniqueHistoryDays: 0,
     };
   }
 
@@ -392,12 +479,37 @@ export function classifyFromDetections(input: ClassifyInput): Classification {
     status = "watch";
   }
 
+  // ── health-score inputs: the graded quantity is the LIVE window ──
+  // Live-window spread (not all-history spread): fire growth NOW.
+  const liveSpreadKm =
+    live.length >= 2
+      ? Math.max(
+          ...live.map((x) => {
+            const cLat = mean(live.map((u) => u.d.lat));
+            const cLng = mean(live.map((u) => u.d.lng));
+            return haversineKm(cLat, cLng, x.d.lat, x.d.lng);
+          }),
+        )
+      : 0;
+  const liveUniqueDays = new Set(live.map((x) => x.d.acq_date)).size;
+  // Newest scoring-grade (usable) detection age — usable[0] is nearest, NOT
+  // newest (distance-sorted), so the old code graded recency off the wrong row.
+  const newestUsableAgeDays = Math.min(...usable.map((x) => ages.get(x)!));
+  // Low-band share of ALL nearby live rows (incl. gated-out) — data trust.
+  const liveSplitTotal = liveConfidenceSplit.high + liveConfidenceSplit.nominal + liveConfidenceSplit.low;
+  const lowConfidenceShare = liveSplitTotal > 0 ? liveConfidenceSplit.low / liveSplitTotal : 0;
+
   const score = computeHealthScore({
-    detectionCount: live.length || usable.length,
-    meanFrp: liveMean,
-    cvFrp: cv,
-    hasRecentDetection: ages.get(usable[0]!)! <= 1,
+    liveCount: live.length,
+    liveMeanFrp: liveMean,
+    livePeakFrp: livePeak,
+    cvFrp: coefficientOfVariation(liveFrps),
+    spreadKm: liveSpreadKm,
+    newestAgeDays: newestUsableAgeDays,
+    liveUniqueDays,
     frpRatioVsBaseline: ratioVsBaseline || maxRatio,
+    baselineWeightSum: trustedBaseline?.weightSum ?? 0,
+    lowConfidenceShare,
   });
 
   return {
@@ -416,6 +528,9 @@ export function classifyFromDetections(input: ClassifyInput): Classification {
     baseline: trustedBaseline,
     newDetectionsLast5d: newDetections.length,
     newDetectionsPriorNearby: prior.length,
+    liveSpreadKm,
+    nightRatio: live.length ? live.filter((x) => x.d.daynight === "N").length / live.length : null,
+    uniqueHistoryDays: new Set(usable.map((x) => x.d.acq_date)).size,
   };
 }
 

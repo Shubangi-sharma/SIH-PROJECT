@@ -513,19 +513,113 @@ body {
 }
 
 /* ================================================================== */
-/* PyroLoader — minimal ember-rise loading screen                      */
+/* PyroLoader — burning-flame loading screen                            */
+/* Keyframes live here (not tailwind.config) so they are ALWAYS emitted */
+/* — inline animation: styles don't trigger Tailwind's JIT emission.    */
+/* Durations are deliberately mismatched so the combined shape never    */
+/* visibly repeats.                                                     */
 /* ================================================================== */
 
-.pyro-loader-ring {
-  background: conic-gradient(
-    from 0deg,
-    rgba(224, 138, 82, 0) 0deg,
-    rgba(224, 138, 82, 0.55) 90deg,
-    rgba(91, 155, 213, 0.65) 200deg,
-    rgba(79, 179, 179, 0.35) 300deg,
-    rgba(224, 138, 82, 0) 360deg
-  );
-  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
-  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
-  animation: sweep 1.6s linear infinite;
+@keyframes fire-sway {
+  0%,
+  100% {
+    border-radius: 50% 50% 44% 44% / 62% 64% 36% 38%;
+    transform: translateX(-50%) skewX(-3deg) scaleY(1);
+  }
+  25% {
+    border-radius: 44% 56% 50% 42% / 58% 66% 34% 42%;
+    transform: translateX(-50%) skewX(2.5deg) scaleY(1.04);
+  }
+  50% {
+    border-radius: 58% 42% 42% 52% / 66% 58% 42% 34%;
+    transform: translateX(-50%) skewX(-1.5deg) scaleY(0.97);
+  }
+  75% {
+    border-radius: 48% 52% 54% 40% / 60% 68% 32% 40%;
+    transform: translateX(-50%) skewX(3deg) scaleY(1.06);
+  }
+}
+
+@keyframes fire-inner {
+  0%,
+  100% {
+    border-radius: 52% 48% 46% 46% / 60% 62% 38% 40%;
+    transform: translateX(-50%) skewX(2deg) scaleY(1);
+  }
+  33% {
+    border-radius: 44% 58% 50% 44% / 56% 68% 32% 44%;
+    transform: translateX(-50%) skewX(-3deg) scaleY(1.07);
+  }
+  66% {
+    border-radius: 58% 44% 44% 50% / 64% 56% 44% 36%;
+    transform: translateX(-50%) skewX(1.5deg) scaleY(0.96);
+  }
+}
+
+@keyframes core-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: translateX(-50%) scale(0.92);
+  }
+  50% {
+    opacity: 1;
+    transform: translateX(-50%) scale(1.08);
+  }
+}
+
+@keyframes flicker {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  30% {
+    opacity: 0.85;
+    transform: scale(1.06);
+  }
+  55% {
+    opacity: 0.45;
+    transform: scale(0.97);
+  }
+  80% {
+    opacity: 0.9;
+    transform: scale(1.03);
+  }
+}
+
+@keyframes ember-rise {
+  0% {
+    transform: translateY(4px) translateX(0) scale(0.6);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  50% {
+    transform: translateY(-16px) translateX(3px) scale(1);
+    opacity: 0.85;
+  }
+  75% {
+    transform: translateY(-28px) translateX(-3px) scale(0.9);
+    opacity: 0.45;
+  }
+  100% {
+    transform: translateY(-42px) translateX(1px) scale(0.4);
+    opacity: 0;
+  }
+}
+
+/* Ambient dust — tiny sparkly particles behind every page but the landing
+   (landing has its own canvas ParticleField). Canvas keeps rAF cost low;
+   this block only holds the shared keyframes. */
+
+@keyframes dust-breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
 }

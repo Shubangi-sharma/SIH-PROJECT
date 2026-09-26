@@ -12,6 +12,8 @@ import WhatChangedPanel from "@/components/WhatChangedPanel";
 import AiSummaryBlock from "@/components/AiSummaryBlock";
 import IncidentTimeline from "@/components/IncidentTimeline";
 import ObservationsPanels from "@/components/ObservationsPanels";
+import PinButton from "@/components/PinButton";
+import FireTagCard from "@/components/FireTagCard";
 import { fetchFacilityAnalysis, fetchSummary } from "@/lib/api";
 import PyroLoader from "@/components/PyroLoader";
 import { FacilityNarrative, RiskStatus } from "@/lib/types";
@@ -190,6 +192,9 @@ export default function FacilityDetailPage() {
               {facility.name}
             </h1>
             <StatusBadge status={status} />
+            <div className="ml-auto w-[220px]">
+              <PinButton facilityId={facility.id} facilityName={facility.name} />
+            </div>
           </div>
           <p className="text-sm text-text-secondary">
             {facility.type} · OpenStreetMap {facility.id.replace("osm-", "")} · status
@@ -272,6 +277,14 @@ export default function FacilityDetailPage() {
 
           {/* RIGHT: narrative stack - computed by the backend, AI grounded in facts */}
           <div className="flex min-w-0 flex-col gap-6">
+            {/* contextual predicted fire type — what is actually burning here */}
+            <FireTagCard
+              tag={analysis.predictedTag?.tag}
+              confidence={analysis.predictedTag?.confidence}
+              reasons={analysis.predictedTag?.reasons}
+              provenance={analysis.predictedTag?.provenance}
+            />
+
             <WhatChangedPanel rows={narrative.whatChanged} />
 
             {/* PDF §4: Persistence group - computed from the stored archive */}

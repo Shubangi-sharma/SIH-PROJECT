@@ -23,10 +23,12 @@ import { chatRouter } from "./routes/chat.route.js";
 import { commandRouter } from "./routes/command.route.js";
 import { predictRouter } from "./routes/predict.route.js";
 import { v1Router } from "./routes/v1.route.js";
+import helmet from "helmet";
 
 export function createApp(): Express {
   const app = express();
 
+  app.use(helmet());
   app.set("x-powered-by", false);
   app.disable("etag");
 

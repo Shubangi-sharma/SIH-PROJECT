@@ -44,22 +44,45 @@ _cache: dict[str, tuple[float, dict]] = {}
 @dataclass
 class LandCover:
     features: dict[str, object]
-    provenance: str  # "gee" | "osm_derived" | "cache"
+    provenance: str  # "osm_derived" | "cache" | "stale_cache" | "unavailable"
 
 
 def _cache_key(lat: float, lng: float) -> str:
     return f"{round(lat, 2)}:{round(lng, 2)}"
 
 
-async def get_land_cover(lat: float, lng: float) -> LandCover:
-    """Return the 10 land-cover features for a point."""
+async def get_land_cover(lat: float, lng: float, *, refresh: bool = False) -> LandCover:
+    """Return the 10 land-cover features for a point.
+
+    `refresh=True` bypasses the cache (the observations UI's refresh button
+    uses it to re-query Overpass instead of re-serving the stored answer).
+    On a total Overpass failure the last good answer is served as
+    "stale_cache"; with no history the block degrades to "unavailable" —
+    the fabricated all-`bare` fallback is never computed OR cached.
+    """
     key = _cache_key(lat, lng)
     hit = _cache.get(key)
     now = time.monotonic()
-    if hit and now - hit[0] < _CACHE_TTL:
+    if hit and not refresh and now - hit[0] < _CACHE_TTL:
         return LandCover(features=dict(hit[1]), provenance="cache")
 
-    features, provenance = await _from_osm(lat, lng)
+    try:
+        features, provenance = await _from_osm(lat, lng)
+    except Exception as exc:  # noqa: BLE001 — both mirrors down / network dead
+        logger.warning("land cover fetch failed for %.3f,%.3f: %s", lat, lng, exc)
+        if hit:
+            # Both mirrors failed — serve the last good answer, labelled stale.
+            return LandCover(features=dict(hit[1]), provenance="stale_cache")
+        return LandCover(features={}, provenance="unavailable")
+
+    if not features:
+        # Overpass answered but carried nothing classifiable for this point —
+        # do NOT fabricate a dominant "bare" prior, and do NOT cache it:
+        # the next call (or refresh) retries the live source.
+        if hit:
+            return LandCover(features=dict(hit[1]), provenance="stale_cache")
+        return LandCover(features={}, provenance="unavailable")
+
     _cache[key] = (now, features)
     return LandCover(features=features, provenance=provenance)
 
@@ -101,7 +124,7 @@ async def _from_osm(lat: float, lng: float) -> tuple[dict, str]:
     for el in elements:
         tags = el.get("tags") or {}
         elat = el.get("lat") or el.get("center", {}).get("lat")
-        elng = el.get("lon") or el.get("center", {}).get("lon")
+        elng = el.get("lon") or el.get("center", {}).get("lng") or el.get("center", {}).get("lon")
         if elat is None or elng is None:
             continue
         d = haversine_km(lat, lng, elat, elng)
@@ -115,20 +138,11 @@ async def _from_osm(lat: float, lng: float) -> tuple[dict, str]:
     total = sum(counts.values())
     observations = float(sum(1 for el in elements if el.get("tags")))
     if total == 0:
-        # No OSM area data → neutral fallback that matches training priors.
-        features = {
-            "dominant_land_cover": "bare",
-            "land_cover_observations": 0.0,
-            "lc_water_ratio": 0.0,
-            "lc_trees_ratio": 0.0,
-            "lc_grass_ratio": 0.0,
-            "lc_flooded_vegetation_ratio": 0.0,
-            "lc_crops_ratio": 0.0,
-            "lc_shrub_and_scrub_ratio": 0.0,
-            "lc_built_ratio": 0.0,
-            "lc_bare_ratio": 1.0,
-        }
-        return features, "osm_derived"
+        # Nothing classifiable within the radius. Return EMPTY features and
+        # let the caller decide (stale cache / honest unavailable) — the old
+        # behaviour fabricated an all-"bare" prior that looked like real
+        # data ("Bare 100%") on the facility page.
+        return {}, "osm_derived"
 
     ratios = {k: v / total for k, v in counts.items()}
     dominant = max(ratios, key=ratios.get)  # type: ignore[arg-type]
@@ -148,22 +162,33 @@ async def _from_osm(lat: float, lng: float) -> tuple[dict, str]:
 
 
 def _classify_osm(tags: dict) -> str | None:
+    """Map one OSM element's tags onto a land-cover class.
+
+    Broadened 2026-09: more real-world classes map now (orchards/plantations
+    → trees, wetlands beyond `swamp`, meadows/pitches → grass, farms/retail
+    → built, beaches/mud → bare) so dense map regions stop defaulting to
+    "bare" just because the exact tag spelling wasn't in the old list.
+    """
     landuse = tags.get("landuse")
     natural = tags.get("natural")
-    if landuse == "reservoir" or natural == "water":
+    if landuse == "reservoir" or natural in ("water", "bay", "river", "canal", "pond"):
         return "water"
-    if natural in ("wood", "forest"):
+    if natural in ("wood", "forest") or landuse in ("forest", "plant_nursery"):
         return "trees"
-    if natural in ("grassland", "grass"):
+    if natural in ("grassland", "grass") or landuse in ("grass", "meadow", "village_green") or tags.get("leisure") in ("pitch", "golf_course", "park"):
         return "grass"
-    if natural in ("wetland", "swamp"):
+    if natural in ("wetland", "swamp", "mangrove"):
         return "flooded_vegetation"
-    if landuse in ("farmland", "orchard", "vineyard", "greenhouse_horticulture"):
+    if landuse in ("farmland", "greenhouse_horticulture", "allotments") or tags.get("landuse") == "orchard" or tags.get("landuse") == "vineyard":
         return "crops"
-    if natural in ("scrub",):
+    if natural in ("scrub", "heath"):
         return "shrub_and_scrub"
-    if landuse in ("industrial", "residential", "commercial") or "building" in tags:
+    if (
+        landuse in ("industrial", "residential", "commercial", "retail", "quarry", "cemetery", "military", "railway")
+        or "building" in tags
+        or tags.get("man_made") in ("works", "storage_tank", "wastewater_plant")
+    ):
         return "built"
-    if natural in ("bare_rock", "sand") or landuse in ("bare", "quarry"):
+    if natural in ("bare_rock", "sand", "beach", "mud", "scree", "shingle") or landuse in ("bare", "quarry"):
         return "bare"
     return None

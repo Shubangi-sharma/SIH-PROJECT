@@ -65,6 +65,11 @@ WEATHER_FEATURES = [
 ]
 
 _API_URL = "https://archive-api.open-meteo.com/v1/archive"
+# Fallback endpoint: the forecast API also serves the recent past
+# (`past_days`) and is a different rate-limit pool — when the ERA5 archive
+# 429s / times out, recent weather still arrives instead of a silent
+# "unavailable" block on the facility page.
+_FORECAST_API_URL = "https://api.open-meteo.com/v1/forecast"
 _CACHE_TTL = settings.WEATHER_CACHE_TTL
 _cache: dict[str, tuple[float, dict]] = {}
 
@@ -135,18 +140,21 @@ async def get_weather(
     lat: float,
     lng: float,
     *,
+    refresh: bool = False,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> Weather:
     """Weather aggregates for a point over the last WEATHER_LOOKBACK_DAYS days.
 
     The daily and hourly series are fetched concurrently; either failing
     alone degrades only its own features (None) while a daily failure makes
-    the whole block "unavailable".
+    the whole block "unavailable". `refresh=True` bypasses the TTL cache
+    (observations UI refresh button). The forecast-API fallback proves
+    when the archive endpoint is rate-limited/down.
     """
     key = _cache_key(lat, lng)
     hit = _cache.get(key)
     now = time.monotonic()
-    if hit and now - hit[0] < _CACHE_TTL:
+    if hit and not refresh and now - hit[0] < _CACHE_TTL:
         return Weather(features=dict(hit[1]), provenance="cache")
 
     # ERA5 lags ~5 days; start conservative (today-6) and clamp on 400.
@@ -162,6 +170,7 @@ async def get_weather(
 
     daily: dict = {}
     hourly: dict = {}
+    provenance = "open-meteo"
     try:
         async with httpx.AsyncClient(timeout=30, transport=transport) as client:
             daily_res, hourly_res = await asyncio.gather(
@@ -187,15 +196,79 @@ async def get_weather(
         else:
             hourly = hourly_res.get("hourly", {}) or {}
     except (httpx.HTTPError, ValueError, KeyError) as exc:
-        logger.warning("open-meteo failed for %s,%s: %s", lat, lng, exc)
-        return Weather(features={f: None for f in WEATHER_FEATURES}, provenance="unavailable")
+        # The ERA5 archive is a separate, tighter rate-limit pool from the
+        # forecast API (verified 2026-09-26: archive 429s while forecast
+        # serves the same variables for the recent past). Rather than a
+        # silent "unavailable" block, retry once against the forecast API's
+        # past_days window.
+        logger.warning("open-meteo archive failed for %s,%s: %s", lat, lng, exc)
+        forecast = await _from_forecast_api(lat, lng, transport=transport)
+        if forecast is None:
+            return Weather(features={f: None for f in WEATHER_FEATURES}, provenance="unavailable")
+        features, provenance = forecast
+    else:
+        features = _derive(daily, hourly)
+        if features is None:
+            # Archive answered but held no usable rows — try the forecast API
+            # before giving up (same rationale as the exception path).
+            forecast = await _from_forecast_api(lat, lng, transport=transport)
+            if forecast is None:
+                return Weather(features={f: None for f in WEATHER_FEATURES}, provenance="unavailable")
+            features, provenance = forecast
+
+    _cache[key] = (now, features)
+    return Weather(features=features, provenance=provenance)
+
+
+async def _from_forecast_api(
+    lat: float,
+    lng: float,
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> tuple[dict[str, float | None], str] | None:
+    """Recent-past aggregates from the forecast API (past_days window).
+
+    Returns (features, provenance) with provenance "open-meteo-forecast",
+    or None when this fallback also fails (true unavailability).
+    """
+    common: dict[str, object] = {
+        "latitude": lat,
+        "longitude": lng,
+        "past_days": min(settings.WEATHER_LOOKBACK_DAYS, 92),  # API cap
+        "forecast_days": 1,
+        "timezone": "UTC",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30, transport=transport) as client:
+            daily_res, hourly_res = await asyncio.gather(
+                client.get(
+                    _FORECAST_API_URL,
+                    params={**common, "daily": ",".join(_DAILY_VARS)},
+                ),
+                client.get(
+                    _FORECAST_API_URL,
+                    params={**common, "hourly": ",".join(_HOURLY_VARS)},
+                ),
+                return_exceptions=True,
+            )
+        if isinstance(daily_res, BaseException):
+            raise ValueError(f"forecast daily series failed: {daily_res}") from daily_res
+        daily_res.raise_for_status()
+        daily = (daily_res.json() or {}).get("daily", {}) or {}
+        hourly: dict = {}
+        if isinstance(hourly_res, BaseException):
+            logger.warning("forecast hourly RH/irradiance failed for %.3f,%.3f: %s", lat, lng, hourly_res)
+        else:
+            hourly_res.raise_for_status()
+            hourly = (hourly_res.json() or {}).get("hourly", {}) or {}
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        logger.warning("open-meteo forecast fallback failed for %s,%s: %s", lat, lng, exc)
+        return None
 
     features = _derive(daily, hourly)
     if features is None:
-        return Weather(features={f: None for f in WEATHER_FEATURES}, provenance="unavailable")
-
-    _cache[key] = (now, features)
-    return Weather(features=features, provenance="open-meteo")
+        return None
+    return features, "open-meteo-forecast"
 
 
 def _derive(daily: dict, hourly: dict) -> dict[str, float | None] | None:

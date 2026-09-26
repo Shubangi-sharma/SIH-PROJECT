@@ -27,6 +27,22 @@ import { haversineKm } from "@/lib/geo";
 import clsx from "clsx";
 
 /**
+ * Client-side mirror of the BFF's H3 res-7 cell budget: viewports wider
+ * than ~150 km per axis fill more than the 5000-cell cap, so the server
+ * answers 413. Pre-checking here keeps the console clean (no failed
+ * requests on the default India view) and renders the same honest
+ * "zoom in" state instantly, without a round-trip.
+ */
+const MAX_RISK_VIEWPORT_SPAN_KM = 150;
+
+function bboxSpanKm(bbox: DrawerBBox): number {
+  const latSpan = Math.abs(bbox.north - bbox.south) * 111;
+  const midLat = Math.min(89, Math.max(-89, (bbox.north + bbox.south) / 2));
+  const lngSpan = Math.abs(bbox.east - bbox.west) * 111 * Math.cos((midLat * Math.PI) / 180);
+  return Math.max(latSpan, lngSpan);
+}
+
+/**
  * DetailDrawer — the map page's PERSISTENT detail pane (not a slide-over).
  *
  * Exactly one state renders at a time, driven by the page's selection state:
@@ -103,6 +119,14 @@ function ViewportRiskSection({ bbox }: { bbox: DrawerBBox }) {
   const [loading, setLoading] = React.useState(false);
 
   React.useEffect(() => {
+    // Too-wide viewport → skip the request entirely (the server would 413).
+    if (bboxSpanKm({ west: bbox.west, south: bbox.south, east: bbox.east, north: bbox.north }) > MAX_RISK_VIEWPORT_SPAN_KM) {
+      setData(null);
+      setTooLarge(true);
+      setUnavailable(false);
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     setData(null);
     setTooLarge(false);

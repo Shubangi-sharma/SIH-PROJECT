@@ -112,7 +112,8 @@ function NearbyHotspot({
   onPick,
 }: {
   h: FirmsHotspot;
-  distKm: number;
+  /** km from the entered point; null = discovery list (no point entered) */
+  distKm: number | null;
   onPick: (lat: number, lng: number) => void;
 }) {
   return (
@@ -131,7 +132,7 @@ function NearbyHotspot({
         </span>
       </span>
       <span className="flex-shrink-0 rounded-full bg-white/[0.05] px-2 py-0.5 font-mono text-[10px] text-text-secondary">
-        {distKm.toFixed(1)} km
+        {distKm == null ? `FRP ${h.frp.toFixed(0)} MW` : `${distKm.toFixed(1)} km`}
       </span>
     </button>
   );
@@ -388,17 +389,29 @@ export default function PredictPage() {
     setError(null);
   }, []);
 
-  /** Nearby live detections (50 km) offered as one-click coordinate fills. */
+  /**
+   * Live FIRMS detections offered as one-click coordinate fills.
+   * Visible BEFORE typing too — the "I don't know coordinates" path should
+   * not require already knowing a point. Near an entered point: within
+   * NEARBY_RADIUS_KM, closest first. Nothing typed: the strongest live
+   * detections right now (highest FRP) as a discovery list.
+   */
   const { hotspots } = useFirms([INDIA_BBOX]);
   const nearby = useMemo(() => {
-    if (!parsed) return [];
+    if (!parsed) {
+      // No coordinates yet → show the strongest live detections (discovery).
+      return [...hotspots]
+        .sort((a, b) => b.frp - a.frp)
+        .slice(0, 6)
+        .map((h) => ({ h, distKm: null as number | null }));
+    }
     return hotspots
       .map((h) => ({
         h,
-        distKm: haversineKm(parsed.lat, parsed.lng, h.latitude, h.longitude),
+        distKm: haversineKm(parsed.lat, parsed.lng, h.latitude, h.longitude) as number | null,
       }))
-      .filter((x) => x.distKm <= NEARBY_RADIUS_KM)
-      .sort((a, b) => a.distKm - b.distKm)
+      .filter((x) => x.distKm != null && x.distKm <= NEARBY_RADIUS_KM)
+      .sort((a, b) => (a.distKm ?? 0) - (b.distKm ?? 0))
       .slice(0, 6);
   }, [parsed, hotspots]);
 
@@ -490,44 +503,45 @@ export default function PredictPage() {
               </form>
             </section>
 
-            {/* nearby live detections - the "I don't know exact coords" path */}
-            {parsed && (
-              <section className="dash-card rounded-xl p-5 dash-section" style={{ animationDelay: "0.15s" }}>
-                <div className="flex items-center justify-between">
-                  <h2 className="font-display text-sm font-semibold text-text-primary">
-                    Live detections nearby
-                  </h2>
-                  <span className="rounded-full bg-white/[0.05] px-2 py-0.5 font-mono text-[10px] text-text-secondary">
-                    within {NEARBY_RADIUS_KM} km
-                  </span>
-                </div>
-                {nearby.length === 0 ? (
-                  <p className="mt-3 text-xs leading-relaxed text-text-tertiary">
-                    No live FIRMS detections within {NEARBY_RADIUS_KM} km of this
-                    point in the current 10-day window. The classifier still
-                    works - it evaluates the point&apos;s environment and fire
-                    history regardless.
+            {/* live detections - the "I don't know exact coords" path.
+                Always visible: before typing it shows the strongest live
+                hotspots right now; after typing, those within 50 km. */}
+            <section className="dash-card rounded-xl p-5 dash-section" style={{ animationDelay: "0.15s" }}>
+              <div className="flex items-center justify-between">
+                <h2 className="font-display text-sm font-semibold text-text-primary">
+                  {parsed ? "Live detections nearby" : "Strongest live hotspots now"}
+                </h2>
+                <span className="rounded-full bg-white/[0.05] px-2 py-0.5 font-mono text-[10px] text-text-secondary">
+                  {parsed ? `within ${NEARBY_RADIUS_KM} km` : "pick to classify"}
+                </span>
+              </div>
+              {nearby.length === 0 ? (
+                <p className="mt-3 text-xs leading-relaxed text-text-tertiary">
+                  No live FIRMS detections within {NEARBY_RADIUS_KM} km of this
+                  point in the current 10-day window. The classifier still
+                  works - it evaluates the point&apos;s environment and fire
+                  history regardless.
+                </p>
+              ) : (
+                <>
+                  <p className="mt-1.5 text-[11px] leading-relaxed text-text-tertiary">
+                    {parsed
+                      ? "Not sure of the exact coordinates? Pick a live detection to fill them in."
+                      : "No coordinates needed to start - pick any live hotspot and it fills the box and classifies."}
                   </p>
-                ) : (
-                  <>
-                    <p className="mt-1.5 text-[11px] leading-relaxed text-text-tertiary">
-                      Not sure of the exact coordinates? Pick a live detection to
-                      fill them in.
-                    </p>
-                    <div className="mt-3 flex flex-col gap-2">
-                      {nearby.map(({ h, distKm }) => (
-                        <NearbyHotspot
-                          key={`${h.latitude},${h.longitude}`}
-                          h={h}
-                          distKm={distKm}
-                          onPick={(lat, lng) => setCoords(`${lat.toFixed(4)}, ${lng.toFixed(4)}`)}
-                        />
-                      ))}
-                    </div>
-                  </>
-                )}
-              </section>
-            )}
+                  <div className="mt-3 flex flex-col gap-2">
+                    {nearby.map(({ h, distKm }) => (
+                      <NearbyHotspot
+                        key={`${h.latitude},${h.longitude}`}
+                        h={h}
+                        distKm={distKm}
+                        onPick={(lat, lng) => setCoords(`${lat.toFixed(4)}, ${lng.toFixed(4)}`)}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+            </section>
           </div>
 
           {/* ── result view ──────────────────────────────────────────── */}

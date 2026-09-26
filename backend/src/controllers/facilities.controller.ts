@@ -11,8 +11,10 @@ import { Request, Response } from "express";
 import { LIVE_WINDOW_DAYS } from "../config/regions.js";
 import { FacilityRow, getAllFacilities, getAllFacilitiesMerged } from "../db/client.js";
 import { cacheKeys, getAnalysesCached, getFacilitiesCached } from "../services/cacheService.js";
-import { analyzeAllFacilities } from "../services/analysisService.js";
+import { analyzeAllFacilities, analyzeFacility, predictedFireTag } from "../services/analysisService.js";
 import { isValidBbox } from "../services/overpassClient.js";
+import { proxyObservations } from "../services/mlProxyService.js";
+import type { FireTagEnvironment, FireTagWeather } from "../services/fireTagService.js";
 
 const json = (res: Response, code: number, body: unknown): void => {
   res.status(code).json(body);
@@ -73,18 +75,85 @@ export function getAnalyses(req: Request, res: Response): void {
   });
 }
 
-/** GET /api/facilities/:id/analyses — full classification + narrative for one. */
-export function getFacilityAnalysis(req: Request, res: Response): void {
+/**
+ * GET /api/facilities/:id/analyses — full classification + narrative for one.
+ *
+ * The Predicted Fire Type is ENRICHED with live environment observations
+ * (land cover + surroundings from the ML service's feature modules) — the
+ * environment often decides between e.g. "agricultural burn" and
+ * "industrial incident" near an untagged "Industrial Site #…". Failure of
+ * the ML service is non-fatal: the tag falls back to fire-physics evidence
+ * and the response notes the degradation.
+ */
+export async function getFacilityAnalysis(req: Request, res: Response): Promise<void> {
   const id = req.params.id;
   const facility = getAllFacilitiesMerged().find((f) => f.id === id);
   if (!facility) {
     json(res, 404, { error: `Facility not found: ${id}` });
     return;
   }
-  const { classification, narrative, persistence, fireCharacteristics } = analyzeFacility(
-    facility,
-    new Date(),
-  );
+  const { classification, narrative, persistence, fireCharacteristics, predictedTag } =
+    analyzeFacility(facility, new Date());
+
+  // Environment enrichment (best-effort, never blocks the classification).
+  let environment: FireTagEnvironment | null = null;
+  let weather: FireTagWeather | null = null;
+  let tagProvenance: "ml_observations" | "fire_physics_only" = "fire_physics_only";
+  try {
+    const { status, body } = await proxyObservations(facility.lat, facility.lng);
+    if (status === 200 && body && typeof body === "object") {
+      const obs = body as {
+        land_cover?: { ratios?: Record<string, number | null>; dominant?: string | null; vegetation_ratio?: number | null; provenance?: string };
+        surroundings?: { distances_km?: Record<string, number | null>; proximity_flags?: Record<string, boolean | null>; provenance?: string };
+        weather?: {
+          mean_temperature_c?: number | null;
+          max_temperature_c?: number | null;
+          mean_relative_humidity?: number | null;
+          min_relative_humidity?: number | null;
+          mean_wind_speed_ms?: number | null;
+          max_wind_speed_ms?: number | null;
+          total_precipitation?: number | null;
+          provenance?: string;
+        };
+      };
+      const lcProv = obs.land_cover?.provenance;
+      const sProv = obs.surroundings?.provenance;
+      const wProv = obs.weather?.provenance;
+      const degraded = lcProv === "unavailable" && sProv === "unavailable";
+      if (!degraded) {
+        environment = {
+          landCover: obs.land_cover?.ratios,
+          dominantLandCover: obs.land_cover?.dominant ?? null,
+          vegetationRatio: obs.land_cover?.vegetation_ratio ?? null,
+          distancesKm: obs.surroundings?.distances_km,
+          proximityFlags: obs.surroundings?.proximity_flags,
+          degraded,
+        };
+        tagProvenance = "ml_observations";
+      }
+      // Weather feeds the tag whenever the ML service returned ANY weather
+      // provenance (open-meteo / forecast / cache) — null fields inside are
+      // handled per-feature by the scorer.
+      if (wProv && wProv !== "unavailable") {
+        const w = obs.weather ?? {};
+        weather = {
+          meanTemperatureC: w.mean_temperature_c ?? null,
+          maxTemperatureC: w.max_temperature_c ?? null,
+          meanRelativeHumidity: w.mean_relative_humidity ?? null,
+          minRelativeHumidity: w.min_relative_humidity ?? null,
+          meanWindSpeedMs: w.mean_wind_speed_ms ?? null,
+          maxWindSpeedMs: w.max_wind_speed_ms ?? null,
+          totalPrecipitation: w.total_precipitation ?? null,
+        };
+        if (tagProvenance === "fire_physics_only") tagProvenance = "ml_observations";
+      }
+    }
+  } catch {
+    // ML service unreachable — tag stays fire-physics-only (honest fallback).
+  }
+
+  const enrichedTag = predictedFireTag(facility, classification, environment, weather, fireCharacteristics.latestBrightnessK);
+
   json(res, 200, {
     facility,
     classification,
@@ -98,8 +167,12 @@ export function getFacilityAnalysis(req: Request, res: Response): void {
     // PDF §4 field groups computed from the stored FIRMS archive.
     persistence,
     fireCharacteristics,
+    // Contextual predicted fire type (environment-enriched when available).
+    predictedTag: {
+      tag: enrichedTag.tag,
+      confidence: enrichedTag.confidence,
+      reasons: enrichedTag.reasons,
+      provenance: tagProvenance,
+    },
   });
 }
-
-// Imported late to avoid a circular-looking import block above.
-import { analyzeFacility } from "../services/analysisService.js";

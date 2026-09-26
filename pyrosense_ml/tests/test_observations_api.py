@@ -165,13 +165,13 @@ def test_weather_block_unavailable():
 async def test_endpoint_degrades_each_block_independently(monkeypatch):
     """One dead source must never 500 — its block degrades to unavailable."""
 
-    async def _lc_fail(lat, lng):
+    async def _lc_fail(lat, lng, *, refresh=False):
         raise RuntimeError("boom")
 
-    async def _osm_ok_async(lat, lng):
+    async def _osm_ok_async(lat, lng, *, refresh=False):
         return _osm_ok()
 
-    async def _wx_fail(lat, lng):
+    async def _wx_fail(lat, lng, *, refresh=False):
         raise RuntimeError("boom")
 
     monkeypatch.setattr("app.api.observations.get_land_cover", _lc_fail)

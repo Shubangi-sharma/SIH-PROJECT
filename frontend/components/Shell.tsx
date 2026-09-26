@@ -4,6 +4,7 @@ import React, { useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import TopBar from "@/components/TopBar";
 import LeftNav from "@/components/LeftNav";
+import AmbientDust from "@/components/AmbientDust";
 import { useAnalyses } from "@/lib/hooks";
 import { REGION_BBOXES } from "@/lib/regions";
 
@@ -33,7 +34,9 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-bg-void">
+    <div className="relative isolate flex h-screen flex-col overflow-hidden bg-bg-void">
+      {/* sparkle dust behind all chrome — landing page runs its own field */}
+      <AmbientDust />
       <TopBar unreadCritical={unreadCritical} />
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <LeftNav

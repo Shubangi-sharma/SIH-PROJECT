@@ -10,6 +10,7 @@
 *.zip
 *.pkl
 !data_science/**/*.pkl
+!FINAL_GRADIENT_BOOSTING_MODEL.pkl
 
 # Only pyrosense_ml + data_science are COPYed; drop the rest of the tree.
 backend

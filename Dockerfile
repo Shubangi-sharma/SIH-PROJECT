@@ -36,6 +36,7 @@ COPY pyrosense_ml/tests/fixtures ./pyrosense_ml/tests/fixtures
 # The frozen model artifacts — model_loader resolves these relative to the
 # REPO ROOT (data_science/…), so they land at /srv/data_science.
 COPY data_science ./data_science
+COPY FINAL_GRADIENT_BOOSTING_MODEL.pkl ./FINAL_GRADIENT_BOOSTING_MODEL.pkl
 
 ENV PYTHONPATH=/srv/pyrosense_ml
 WORKDIR /srv/pyrosense_ml

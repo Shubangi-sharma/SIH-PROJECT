@@ -63,12 +63,15 @@ def _overpass_query(lat: float, lng: float) -> str:
     return f"[out:json][timeout:60];({parts});out center tags {SEARCH_RADIUS_M // 10};"
 
 
-async def get_osm_distances(lat: float, lng: float) -> OsmDistances:
-    """Nearest distance (km) per category, or None when unavailable/none found."""
+async def get_osm_distances(lat: float, lng: float, *, refresh: bool = False) -> OsmDistances:
+    """Nearest distance (km) per category, or None when unavailable/none found.
+
+    `refresh=True` bypasses the TTL cache (observations UI refresh button).
+    """
     key = _cache_key(lat, lng)
     hit = _cache.get(key)
     now = time.monotonic()
-    if hit and now - hit[0] < _CACHE_TTL:
+    if hit and not refresh and now - hit[0] < _CACHE_TTL:
         return OsmDistances(distances=hit[1], cached=True)
 
     query = _overpass_query(lat, lng)
@@ -92,7 +95,8 @@ async def get_osm_distances(lat: float, lng: float) -> OsmDistances:
 
     if not elements:
         if hit:
-            # Both mirrors failed — serve stale cache rather than Nones.
+            # Both mirrors failed — serve stale cache rather than Nones,
+            # labelled so the UI can surface the staleness honestly.
             return OsmDistances(distances=hit[1], cached=True)
         # No data at all — do not cache the failure; retry next call.
         return OsmDistances(

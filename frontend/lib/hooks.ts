@@ -66,6 +66,9 @@ function toAnalysis(a: FacilityAnalysisDto): FacilityAnalysis {
     latestFrp: a.latestFrp,
     nearestKm: a.nearestKm,
     detectionCount: a.detectionCount,
+    liveMeanFrp: a.liveMeanFrp,
+    baselineMeanFrp: a.baselineMeanFrp,
+    predictedTag: a.predictedTag,
     liveConfidenceSplit: a.liveConfidenceSplit,
   };
 }

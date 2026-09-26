@@ -193,13 +193,17 @@ export interface ObservationsResponseDto {
 /**
  * GET /api/ml/observations?lat=…&lng=… — live environmental observations.
  * External sources are queried upstream with per-block caching, so repeated
- * calls for nearby points are cheap.
+ * calls for nearby points are cheap. `refresh=true` forwards the flag so the
+ * ML service re-queries Overpass/Open-Meteo instead of serving its cache —
+ * used by the observations UI's refresh button.
  */
 export async function fetchObservations(
   lat: number,
   lng: number,
+  opts?: { refresh?: boolean },
 ): Promise<ObservationsResponseDto> {
   const qs = new URLSearchParams({ lat: String(lat), lng: String(lng) });
+  if (opts?.refresh) qs.set("refresh", "1");
   const res = await fetch(`${ML_PROXY_BASE}/api/ml/observations?${qs.toString()}`);
   if (!res.ok) {
     let detail = `ML proxy ${res.status} for /api/ml/observations`;

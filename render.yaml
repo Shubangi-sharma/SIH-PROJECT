@@ -1,0 +1,54 @@
+services:
+  # Managed PostgreSQL
+  - type: pgo
+    name: pyrosense-db
+    plan: standard
+    databaseName: pyrosense_ml
+    user: pyrosense
+
+  # FastAPI ML Service
+  - type: web
+    name: pyrosense-ml
+    env: docker
+    dockerfilePath: ./Dockerfile
+    plan: standard
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: pyrosense-db
+          property: connectionString
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: FIRMS_MAP_KEY
+        sync: false
+      - key: SEED_ON_STARTUP
+        value: "true"
+      - key: ENABLE_LIVE_INGEST_SCHEDULER
+        value: "false"
+
+  # Node.js Backend Service
+  - type: web
+    name: pyrosense-backend
+    env: docker
+    dockerContext: ./backend
+    dockerfilePath: ./backend/Dockerfile
+    plan: standard
+    disk:
+      name: backend-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: DATABASE_URL
+        value: /data/pyrosense.db
+      - key: ML_API_BASE_URL
+        fromService:
+          type: web
+          name: pyrosense-ml
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: FIRMS_MAP_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      # For production frontend URL (e.g. Vercel)
+      - key: CORS_ORIGIN
+        sync: false

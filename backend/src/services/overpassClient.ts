@@ -78,7 +78,14 @@ export type FacilityType = "Refinery" | "Power Plant" | "Industrial Site" | "Min
 function deriveType(tags: Record<string, string>): FacilityType {
   if (tags.industrial === "oil" || tags.man_made === "works") return "Refinery";
   if (tags.power === "plant") return "Power Plant";
-  if (tags.man_made === "petroleum_well") return "Mine";
+  if (
+    tags.man_made === "petroleum_well" ||
+    tags.landuse === "quarry" ||
+    tags.industrial === "mine" ||
+    tags.industrial === "quarry"
+  ) {
+    return "Mine";
+  }
   return "Industrial Site"; // landuse=industrial and anything untagged
 }
 

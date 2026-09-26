@@ -15,6 +15,7 @@ import {
 import { useAnalyses } from "@/lib/hooks";
 import { REGION_BBOXES } from "@/lib/regions";
 import { StatusGlyph } from "@/lib/status";
+import PinButton from "@/components/PinButton";
 import clsx from "clsx";
 
 const TYPES: FacilityType[] = [
@@ -51,7 +52,8 @@ const cardContentVisibilityStyle: React.CSSProperties = {
 
 /**
  * Memoised card — a SWR refresh re-renders only cards whose underlying
- * analysis actually changed (§5).
+ * analysis actually changed (§5). The pin button writes to the shared
+ * compare store (max 3) without navigating away.
  */
 const FacilityCard = React.memo(function FacilityCard({
   analysis,
@@ -61,8 +63,7 @@ const FacilityCard = React.memo(function FacilityCard({
   const { facility: f, status } = analysis;
   const hex = STATUS_META[status].hex;
   return (
-    <Link
-      href={`/facilities/${f.id}`}
+    <div
       style={cardContentVisibilityStyle}
       className="dash-card dash-stat group relative flex flex-col gap-3 overflow-hidden rounded-xl p-5"
     >
@@ -84,10 +85,14 @@ const FacilityCard = React.memo(function FacilityCard({
         }}
       />
       <div className="relative flex items-center justify-between gap-2">
-        <span className="truncate font-display text-sm font-semibold text-text-primary">
+        <Link
+          href={`/facilities/${f.id}`}
+          className="min-w-0 flex-1 truncate font-display text-sm font-semibold text-text-primary transition-colors duration-150 hover:text-accent-primary"
+        >
           {f.name}
-        </span>
+        </Link>
         <StatusGlyph status={status} size={9} className="flex-shrink-0" />
+        <PinButton facilityId={f.id} facilityName={f.name} asIcon />
       </div>
       <p className="relative text-xs text-text-secondary">
         {f.type} · {f.source === "osm" ? "OpenStreetMap" : f.source}
@@ -103,7 +108,7 @@ const FacilityCard = React.memo(function FacilityCard({
           {analysis.latestFrp != null ? `${analysis.latestFrp.toFixed(0)} MW` : "-"}
         </span>
       </div>
-    </Link>
+    </div>
   );
 });
 
